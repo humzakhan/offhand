@@ -1,0 +1,49 @@
+name: Bug report
+description: Something Offhand does wrong
+labels: [bug]
+body:
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS
+      options:
+        - macOS
+        - Windows
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+    validations:
+      required: true
+  - type: input
+    id: chip-gpu
+    attributes:
+      label: Chip / GPU
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model in use
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
