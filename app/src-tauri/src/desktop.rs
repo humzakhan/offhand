@@ -50,18 +50,24 @@ pub fn create_windows(app: &AppHandle) -> tauri::Result<()> {
         if floating && label != "overlay" {
             // Native material is optional; the CSS graphite surface remains the fallback.
             #[cfg(target_os = "macos")]
-            let native_material = window.set_effects(tauri::utils::config::WindowEffectsConfig {
-                effects: vec![tauri::window::Effect::HudWindow],
-                ..Default::default()
-            }).is_ok();
+            let native_material = window
+                .set_effects(tauri::utils::config::WindowEffectsConfig {
+                    effects: vec![tauri::window::Effect::HudWindow],
+                    ..Default::default()
+                })
+                .is_ok();
             #[cfg(target_os = "windows")]
-            let native_material = window.set_effects(tauri::utils::config::WindowEffectsConfig {
-                effects: vec![tauri::window::Effect::Acrylic],
-                ..Default::default()
-            }).is_ok();
+            let native_material = window
+                .set_effects(tauri::utils::config::WindowEffectsConfig {
+                    effects: vec![tauri::window::Effect::Acrylic],
+                    ..Default::default()
+                })
+                .is_ok();
             #[cfg(not(any(target_os = "macos", target_os = "windows")))]
             let native_material = false;
-            if native_material { materials.push(label.to_owned()); }
+            if native_material {
+                materials.push(label.to_owned());
+            }
         }
         let handle = app.clone();
         let label = label.to_owned();
@@ -320,8 +326,14 @@ pub fn emit(app: &AppHandle, revision: u64, ui: &UiState) {
     let materials = app.state::<NativeMaterials>();
     for label in ["command", "confirm"] {
         if let Some(window) = app.get_webview_window(label) {
-            let material = if materials.0.iter().any(|name| name == label) { "native" } else { "fallback" };
-            let _ = window.eval(format!("document.documentElement.dataset.material='{material}'"));
+            let material = if materials.0.iter().any(|name| name == label) {
+                "native"
+            } else {
+                "fallback"
+            };
+            let _ = window.eval(format!(
+                "document.documentElement.dataset.material='{material}'"
+            ));
         }
     }
     let _ = app.emit(
