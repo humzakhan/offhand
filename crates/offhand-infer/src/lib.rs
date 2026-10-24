@@ -141,6 +141,23 @@ pub fn shortlist(
     labels: &[&str],
     k: usize,
 ) -> Result<Vec<usize>> {
+    Ok(shortlist_with_scores(embedder, query, labels, k)?
+        .into_iter()
+        .map(|(index, _)| index)
+        .collect())
+}
+
+/// Rank label indices with their cosine scores, using [`shortlist`]'s batch contract.
+///
+/// Returns at most `k` pairs in descending score order, with input order breaking
+/// ties. Scores let callers reject weak semantic matches without embedding twice.
+/// Backend errors and malformed batches return an error, never a partial ranking.
+pub fn shortlist_with_scores(
+    embedder: &dyn Embedder,
+    query: &str,
+    labels: &[&str],
+    k: usize,
+) -> Result<Vec<(usize, f32)>> {
     if labels.is_empty() || k == 0 {
         return Ok(Vec::new());
     }
@@ -170,5 +187,6 @@ pub fn shortlist(
         .map(|(index, vector)| (index, cosine(&vectors[0], vector)))
         .collect();
     scores.sort_by(|(a_index, a), (b_index, b)| b.total_cmp(a).then_with(|| a_index.cmp(b_index)));
-    Ok(scores.into_iter().take(k).map(|(index, _)| index).collect())
+    scores.truncate(k);
+    Ok(scores)
 }

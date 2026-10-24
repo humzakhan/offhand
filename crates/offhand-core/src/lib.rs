@@ -9,6 +9,9 @@ use std::sync::mpsc::{self, Receiver, Sender};
 
 static NEXT_CONFIRMATION_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Minimum cosine score for semantic fallback; provisional until benched on both OSes.
+pub const MIN_EMBED_SCORE: f32 = 0.45;
+
 /// Escalation ladder retained for future local inference backends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Tier {
@@ -275,9 +278,10 @@ impl<P: Platform, E: Engine> Agent<P, E> {
 
     /// Override the default local embedder used to rank accessibility labels.
     ///
-    /// Label commands use the highest-ranked enabled target, then enter the
-    /// existing policy and confirmation path. Embedding errors fall back to the
-    /// deterministic label matcher. This does not enable VLM selection or capture.
+    /// Deterministic matches take priority. Otherwise, label commands use the
+    /// highest-ranked enabled target only at or above [`MIN_EMBED_SCORE`], then
+    /// enter the existing policy and confirmation path. Embedding errors leave
+    /// the command unmatched. This does not enable VLM selection or capture.
     #[must_use]
     pub fn with_embedder(mut self, embedder: Box<dyn Embedder>) -> Self {
         self.embedder = Some(embedder);
@@ -285,9 +289,10 @@ impl<P: Platform, E: Engine> Agent<P, E> {
     }
 
     fn match_label<'a>(&self, tree: &'a [Element], query: &str) -> Option<&'a Element> {
-        let Some(embedder) = self.embedder.as_deref() else {
-            return unique_match(tree, query);
-        };
+        if let Some(element) = unique_match(tree, query) {
+            return Some(element);
+        }
+        let embedder = self.embedder.as_deref()?;
         if query.is_empty() {
             return None;
         }
@@ -303,10 +308,11 @@ impl<P: Platform, E: Engine> Agent<P, E> {
             })
             .collect();
         let labels: Vec<_> = candidates.iter().map(|(_, label)| *label).collect();
-        match offhand_infer::shortlist(embedder, query, &labels, 1) {
-            Ok(indices) => indices.first().map(|&index| candidates[index].0),
-            Err(_) => unique_match(tree, query),
-        }
+        let scores = offhand_infer::shortlist_with_scores(embedder, query, &labels, 1).ok()?;
+        scores
+            .first()
+            .filter(|(_, score)| *score >= MIN_EMBED_SCORE)
+            .map(|&(index, _)| candidates[index].0)
     }
 
     /// Current public state; accepting a command does not imply completion.
