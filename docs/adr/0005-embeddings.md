@@ -58,12 +58,14 @@ and a backend is available. `Agent::new` calls `default_embedder()`;
 until slice F supplies the feature-gated runtime; it adds no native dependency.
 
 `Agent::resolve` invokes `match_label` for click and label-based press commands,
-including pre-dispatch revalidation. With an embedder, it ranks enabled,
-nonempty labels and selects the top candidate, preserving native element
-identity. Equal scores retain tree order. Without an embedder, or on any
-embedding error, it uses the original deterministic matcher over the full tree.
-No confidence threshold is imposed by this seam; backend quality must be
-measured. Ranking never executes actions or bypasses `offhand_policy::classify`,
+including pre-dispatch revalidation. D21 makes the original deterministic matcher
+run first: any unique valid match wins without an embedding call. For unmatched
+or ambiguous queries, an embedder ranks enabled, nonempty labels and selects the
+top candidate only at cosine >= `MIN_EMBED_SCORE` (0.45), preserving native
+element identity. This threshold is provisional until benched on both OSes.
+Equal scores retain tree order. No embedder, embedding failure or a score below
+the threshold leaves the command unmatched / Stuck. Ranking never executes
+actions or bypasses `offhand_policy::classify`,
 confirmation or target revalidation. VLM selection and capture remain disabled.
 
 ## Acceptance condition

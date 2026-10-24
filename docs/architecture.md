@@ -38,9 +38,10 @@ Mutating invokes acknowledge actor acceptance, not semantic task completion.
 1. `listen` records the external foreground window before command-bar activation.
    Direct CLI `submit` captures it automatically. `open` works without a window.
 2. `submit` replaces all prior work and approvals. Resolve the command against a
-   fresh, bounded snapshot of that captured window. With a local embedder, rank
-   enabled labels and select the top target; otherwise match labels uniquely.
-   Embedding errors use the deterministic matcher. Never guess coordinates.
+   fresh, bounded snapshot of that captured window. Match labels uniquely first.
+   If unmatched or ambiguous, a local embedder may select the top enabled target
+   at cosine >= 0.45 (provisional until benched). Errors or lower scores remain
+   unmatched. Never guess coordinates.
 3. Publish Running with the highlight, AwaitConfirm with a new increasing ID,
    Blocked, or Stuck. No action is dispatched on the resolution tick.
 4. A later tick restores the captured window through a policy-approved
@@ -97,9 +98,10 @@ bypass integrity levels, foreground restrictions or rejected SendInput calls.
 ## Current limits versus future design
 
 Local embeddings are defined in [ADR-0005](adr/0005-embeddings.md). Agent loads
-the default embedder when available and uses its semantic label ranking during
-target resolution, before policy and confirmation. With no backend or on an
-embedding error, it retains the original deterministic matcher. Future T1 can
+the default embedder when available and uses semantic label ranking only when
+deterministic matching cannot resolve a unique target. The provisional minimum
+cosine is 0.45; policy and confirmation still apply. With no backend, on an
+embedding error or below that score, the command stays unmatched. Future T1 can
 reuse the shortlist before `Engine::choose`.
 
 Capture returns Unimplemented on both OSes. NoopEngine returns Unimplemented for
