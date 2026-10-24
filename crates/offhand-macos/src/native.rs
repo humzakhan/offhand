@@ -284,7 +284,10 @@ impl Object {
             return Err(Error::Other("invalid accessibility geometry".into()));
         }
         // A partially off-screen window can have its top-left corner outside every display.
-        let center = Point { x: p.x + s.w / 2.0, y: p.y + s.h / 2.0 };
+        let center = Point {
+            x: p.x + s.w / 2.0,
+            y: p.y + s.h / 2.0,
+        };
         let mut display = 0;
         let mut count = 0;
         // SAFETY: one display slot and count storage are valid writable outputs.
