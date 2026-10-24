@@ -20,3 +20,13 @@ impl Platform for WindowsPlatform {
         Err(Error::Unimplemented)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn passes_contract_tests() {
+        offhand_platform::contract::run_contract_tests(&WindowsPlatform);
+    }
+}

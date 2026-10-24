@@ -10,3 +10,6 @@ authors.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+offhand-infer = { path = "../offhand-infer" }

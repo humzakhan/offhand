@@ -16,4 +16,5 @@ name = "offhand"
 path = "src/main.rs"
 
 [dependencies]
+offhand-core = { path = "../offhand-core" }
 clap = { version = "4", features = ["derive"] }

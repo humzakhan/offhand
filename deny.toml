@@ -2,8 +2,6 @@
 version = 2
 unmaintained = "workspace"
 yanked = "warn"
-# Advisories warn rather than fail the build.
-unsound = "warn"
 
 [licenses]
 version = 2

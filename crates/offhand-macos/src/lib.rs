@@ -26,6 +26,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn passes_contract_tests() {
+        offhand_platform::contract::run_contract_tests(&MacPlatform);
+    }
+
+    #[test]
     fn stub_is_unimplemented() {
         assert!(matches!(MacPlatform.tree(None), Err(Error::Unimplemented)));
     }

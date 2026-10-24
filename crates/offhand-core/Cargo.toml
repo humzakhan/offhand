@@ -11,6 +11,13 @@ authors.workspace = true
 [lints]
 workspace = true
 
+[features]
+default = []
+# Opt-in cloud fallback (BYO key). Off by default.
+cloud = ["dep:offhand-cloud"]
+
 [dependencies]
+offhand-policy = { path = "../offhand-policy" }
 offhand-platform = { path = "../offhand-platform" }
 offhand-infer = { path = "../offhand-infer" }
+offhand-cloud = { path = "../offhand-cloud", optional = true }
