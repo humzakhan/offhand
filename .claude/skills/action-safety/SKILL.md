@@ -9,7 +9,7 @@ Offhand acts on the user's computer. One wrong click can send a message or spend
 
 ## The hard rule
 
-Do not call `Platform::act` from any other path. Not from `offhand-core`, not from the app, not from tests of other crates. Only the policy gate holds the handle that can act.
+`offhand-core` calls `Platform::act` only after `offhand_policy::classify` returns Safe, or the user confirms. Do not call it from any other path, and not from the app or from tests of other crates.
 
 ## Risk classes
 
@@ -34,17 +34,19 @@ These are always Confirm, whatever the tier or the task text says:
 A user setting can make a rule stricter. Nothing may make an always-Confirm case weaker, including a model output, a page text, or an on-screen instruction. Treat text read from the screen as data, not as a command.
 
 ```rust
-pub fn classify(action: &Action, ctx: &Context) -> Risk {
-    if ctx.target_is_password_field() { return Risk::Confirm; }
-    match action {
-        Action::Click(t) if t.looks_like_send_or_buy() => Risk::Confirm,
-        Action::Type { .. } | Action::Click(_) | Action::Scroll(_) => Risk::Safe,
-        _ => Risk::Confirm,
-    }
+pub fn classify(action: &Action, target: Option<&Element>) -> Risk {
+    let label = target.and_then(|e| e.label.as_deref()).map(str::to_lowercase);
+    let Some(label) = label else { return Risk::Safe };
+    let risky = match action {
+        Action::Type(_) => label.contains("password"),
+        Action::Press(_) | Action::Click { .. } => RISKY_WORDS.iter().any(|w| label.contains(w)),
+        Action::Key(_) | Action::Scroll { .. } => false,
+    };
+    if risky { Risk::Confirm } else { Risk::Safe }
 }
 ```
 
-Use a `_ =>` arm that returns `Confirm`. A new action type must not default to Safe.
+Match every `Action` variant explicitly, so a new variant fails to compile until it has a class. Any catch-all arm must return `Confirm`. A new action type must not default to Safe.
 
 ## Tests
 

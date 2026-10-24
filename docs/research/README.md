@@ -9,7 +9,7 @@ unless a row says otherwise.
 - Qwen3.5-4B: https://huggingface.co/Qwen/Qwen3.5-4B
 - UI-Venus-1.5-2B: https://huggingface.co/inclusionAI/UI-Venus-1.5-2B
 - gua: https://huggingface.co/LaplAI/gua
-- Holo1.5: https://huggingface.co/Hcompany/Holo1.5-3B
+- Holo1.5: https://huggingface.co/Hcompany/Holo1.5-7B
 - DeskForge-Qwen3.5-4B: https://huggingface.co/docling-project/DeskForge-Qwen3.5-4B
 - Northstar CUA Fast: https://huggingface.co/Tzafon/Northstar-CUA-Fast
 - UI-TARS-1.5-7B: https://huggingface.co/ByteDance-Seed/UI-TARS-1.5-7B

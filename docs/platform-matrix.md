@@ -1,8 +1,9 @@
 # Platform matrix
 
 This table records each capability on macOS and Windows. A row that is not
-equal on both platforms needs a reason in the Notes column. `cargo xtask
-parity-check` fails if a row has a value in one column only.
+equal on both platforms needs a reason in the Notes column. TODO: `cargo xtask
+parity-check` is planned. Once it exists, it will fail if a row has a value in
+one column only.
 
 | Capability | macOS | Windows | Notes |
 |---|---|---|---|

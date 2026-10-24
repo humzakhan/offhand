@@ -26,7 +26,7 @@ None. You only read.
 2. **Platform parity.** A change to `offhand-platform` must touch `offhand-macos` and `offhand-windows`, the contract tests, and `docs/platform-matrix.md`. Flag any `cfg` outside a platform crate.
 3. **Tests.** New behaviour has a test. A bug fix has a test that failed before the fix.
 4. **Latency evidence.** A change to capture, prompts, or inference includes a before-and-after bench table with machine, model, crop size, and commit.
-5. **Hard rules.** No `Platform::act` outside `offhand-policy`. No network outside `offhand-cloud`. No weights committed. New models are in `models/manifest.toml`.
+5. **Hard rules.** `offhand-core` calls `Platform::act` only after `offhand_policy::classify` returns Safe, or the user confirms. No network outside `offhand-cloud`. No weights committed. New models are in `models/manifest.toml`.
 6. **Style.** No `unwrap` in library code. `// SAFETY:` on every `unsafe` block. `thiserror` in libraries.
 
 ## Output format

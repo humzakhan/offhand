@@ -12,8 +12,9 @@ Thanks for looking at Offhand. Keep changes focused and explain the why in the P
 ## Build
 
 ```sh
-cargo check --workspace
 npm --prefix app install
+npm --prefix app run build
+cargo check --workspace
 npm --prefix app run tauri dev
 ```
 

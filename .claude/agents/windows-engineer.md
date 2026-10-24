@@ -21,7 +21,7 @@ Implement the `Platform` trait on Windows. You are the mirror of `macos-engineer
 
 ## What you must know
 
-- **Tree:** UI Automation through the `uiautomation` crate. Use `ControlType`, `Name`, `BoundingRectangle`, and the `InvokePattern`. Subscribe to UIA events to learn when a window changes.
+- **Tree:** UI Automation through the `uiautomation` crate. Use `ControlType`, `Name`, `BoundingRectangle`, and the `UIInvokePattern`. Subscribe to UIA events to learn when a window changes.
 - **Input:** `SendInput` for clicks, keys, and scroll.
 - **UIPI:** A process cannot inject input into a window with a higher integrity level. When blocked, `SendInput` returns 0 and sets no error. Compare the return value with the number of events you sent. Report a typed error when they differ.
 - **Capture:** Windows.Graphics.Capture through the `windows-capture` crate. Capture one window, not the display.

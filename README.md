@@ -120,8 +120,9 @@ Line Tools. On Windows, install the MSVC Build Tools and WebView2.
 ```sh
 git clone https://github.com/humzakhan/offhand
 cd offhand
-cargo check --workspace
 npm --prefix app install
+npm --prefix app run build
+cargo check --workspace
 npm --prefix app run tauri dev
 ```
 

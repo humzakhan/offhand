@@ -22,8 +22,8 @@ boundary.
 2. **Keep inference local.** Only `offhand-cloud` may open a network
    connection, and only behind the `cloud` feature. The model download in
    `xtask fetch-model` and the app updater are the two exceptions.
-3. **Route every action through `offhand-policy`.** Do not call
-   `Platform::act` from any other path.
+3. **Route every action through `offhand-policy`.** `offhand-core` calls `Platform::act` only after `offhand_policy::classify` returns Safe, or the user confirms.
+   Do not call `Platform::act` from any other path.
 4. **Prefer the tree.** Do not add a model call where an accessibility query
    can answer the question. See the `accessibility-first` skill.
 5. **Measure latency changes.** A change to capture, prompts, or inference

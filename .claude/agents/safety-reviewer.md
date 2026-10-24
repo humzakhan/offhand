@@ -26,7 +26,7 @@ Find real risks in what the agent may do, what it may reach, and what it may lea
 
 ## What to check
 
-1. Every act reaches `Platform::act` only through `offhand-policy`. Search for other callers.
+1. `offhand-core` calls `Platform::act` only after `offhand_policy::classify` returns Safe, or the user confirms. Search for other callers.
 2. Always-Confirm cases stay Confirm: sending messages, purchases, deletes, typing into password fields, and system settings. A weaker rule is blocking.
 3. Policy defaults to the stricter class when input is unknown.
 4. Each window has its own capability file with the fewest permissions. No wildcard permissions. No remote URLs. The CSP is strict.
