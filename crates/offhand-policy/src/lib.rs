@@ -23,7 +23,7 @@ const RISKY_WORDS: [&str; 8] = [
 pub fn classify(action: &Action, target: Option<&Element>) -> Risk {
     let label = target.and_then(|e| e.label.as_deref()).unwrap_or_default().to_lowercase();
     match action {
-        Action::FocusWindow(_) => Risk::Safe,
+        Action::FocusWindow(_) | Action::Scroll { .. } => Risk::Safe,
         Action::OpenApp(name) => {
             let name = name.trim();
             if name.is_empty() || name.starts_with('-') || name.contains(['/', '\\', ':'])
@@ -52,7 +52,6 @@ pub fn classify(action: &Action, target: Option<&Element>) -> Risk {
             else if matches!(key.as_str(), "tab" | "left" | "right" | "up" | "down" | "home" | "end" | "pageup" | "pagedown") { Risk::Safe }
             else { Risk::Confirm }
         }
-        Action::Scroll { .. } => Risk::Safe,
     }
 }
 

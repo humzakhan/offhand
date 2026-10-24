@@ -1,94 +1,122 @@
 # Architecture
 
-This document describes the components of Offhand, their boundaries, and the
-step loop. The reasons for each choice are in [`thesis.md`](thesis.md) and in
-[`adr/`](adr/). The UI surfaces are specified in [`ui.md`](ui.md).
+Offhand v0.1 implements a deterministic accessibility-first runner. Each run
+contains one explicit `open`, `click`, `type` or `press` command. The broader
+local-model ladder is a future design, not an enabled fallback. The visual
+reference is [ui.md](ui.md); deliberate v0.1 limits are recorded below and in
+[platform-matrix.md](platform-matrix.md).
 
-## Components
+## Boundaries
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                        OFFHAND  (Tauri v2 app)                           │
-│  ┌──────────────┐  ┌──────────────────┐  ┌──────────────┐  ┌──────────┐  │
-│  │ Command bar  │  │ Overlay (click-  │  │ Settings /   │  │ Tray /   │  │
-│  │ hotkey       │  │ through, hidden  │  │ model picker │  │ menu bar │  │
-│  │              │  │ from capture)    │  │              │  │          │  │
-│  └──────┬───────┘  └────────▲─────────┘  └──────┬───────┘  └────┬─────┘  │
-│         └───────── React + TS (Vite) ───────────┴───────────────┘        │
-│                          │  Tauri commands + events                      │
-├──────────────────────────┼───────────────────────────────────────────────┤
-│                          ▼          RUST CORE (cargo workspace)          │
-│  ┌────────────────────────────────────────────────────────────────────┐  │
-│  │ offhand-core   step loop · tier router · task state · element cache│  │
-│  └───┬───────────────────┬──────────────────────┬──────────────────┬──┘  │
-│      ▼                   ▼                      ▼                  ▼     │
-│ ┌──────────┐   ┌──────────────────┐   ┌──────────────────┐ ┌──────────┐  │
-│ │ policy   │   │ platform (trait) │   │ infer (trait)    │ │ cloud    │  │
-│ │ Safe     │   │ tree()           │   │ choose(options)  │ │ BYO key  │  │
-│ │ Confirm  │   │ capture()        │   │ ground() → (x,y) │ │ feature  │  │
-│ │ Block    │   │ act()            │   │ llama.cpp mtmd   │ │ "cloud"  │  │
-│ └──────────┘   └────┬─────────┬───┘   └──────────────────┘ └──────────┘  │
-│                     ▼         ▼                                          │
-│           ┌──────────────┐ ┌───────────────┐                             │
-│           │ offhand-macos│ │offhand-windows│                             │
-│           │ AXUIElement  │ │ UI Automation │                             │
-│           │ CGEvent      │ │ SendInput     │                             │
-│           │ ScreenCapKit │ │ WGC capture   │                             │
-│           └──────────────┘ └───────────────┘                             │
-└──────────────────────────────────────────────────────────────────────────┘
-```
-
-## Crates
-
-| Crate | Responsibility | Depends on |
+| Component | Owns | Calls |
 |---|---|---|
-| `offhand-platform` | `Platform` trait, shared types, contract tests | none |
-| `offhand-macos` | macOS implementation of `Platform` | platform |
-| `offhand-windows` | Windows implementation of `Platform` | platform |
-| `offhand-policy` | Risk classification of each action | platform |
-| `offhand-infer` | `Engine` trait and the llama.cpp backend | platform |
-| `offhand-cloud` | Optional remote engine (feature `cloud`) | infer |
-| `offhand-core` | Step loop and tier router | platform, policy, infer |
-| `offhand-cli` | `offhand` command for scripts, bench, and CI | core |
-| `app/src-tauri` | Desktop app shell | core |
+| `offhand-platform` | Platform trait, native types and grant vocabulary | No OS implementation |
+| `offhand-macos` | AX tree/press, CGEvent input, captured-window activation | macOS APIs |
+| `offhand-windows` | UIA tree/invoke, SendInput, captured-window activation | Windows APIs |
+| `offhand-policy` | Exhaustive Safe / Confirm / Block classification | Shared types only |
+| `offhand-infer` | Engine trait and NoopEngine | No inference in v0.1 |
+| `offhand-cloud` | Optional future remote inference | Feature `cloud`, default-off |
+| `offhand-core` | Parsing, pinned target, staged runner, approval identity, UI state | Platform, policy, Engine interface |
+| `offhand-cli` | Native adapter selection, terminal approval and Ctrl+C | Same Agent + NoopEngine |
+| `app/src-tauri` | Actor, shortcuts, tray, permissions, persistence and IPC | Same Agent + NoopEngine |
+| React surfaces | Local presentation and explicit commands | Restricted per-window IPC |
 
-`offhand-core` does not contain platform `cfg` attributes. The app and the CLI
-select the platform crate at compile time.
+Only core dispatches `Platform::act`, and every dispatch is gated by policy.
+There are no OS `cfg` branches in core and no Send/Sync requirement on Platform.
+Windows COM-bearing state stays on its owning thread. The desktop actor
+constructs the native adapter inside that thread, drains controls before ticks,
+and forwards subscribed states. The shell must not hold Agent in a cross-thread
+Mutex or dispatch actions directly.
 
-## Step loop
+The app has exactly five labels: `command`, `overlay`, `confirm`, `first-run`
+and `settings`; there is no main window. Capabilities and handler-side caller
+checks limit each label's commands. The overlay only listens to state events.
+Mutating invokes acknowledge actor acceptance, not semantic task completion.
 
-```
-  task
-    │
-    ▼
-  T0  read tree (cached until a window-change event)
-    │   target resolved? ── yes ──▶ policy ──▶ act ──▶ verify
-    │ no
-    ▼
-  T1  crop to window ─▶ candidates from tree ─▶ Engine::choose
-    │   prob ≥ threshold? ── yes ──▶ policy ──▶ act ──▶ verify
-    │ no
-    ▼
-  T2  Engine::ground ─▶ (x, y) ─▶ policy ──▶ act ──▶ verify
-    │ two failures, or a multi-step plan is needed
-    ▼
-  T3  cloud engine (only if the feature is on and the user gave a key)
-```
+## Staged T0 loop
 
-Verification reads the tree first. It captures a new frame only if the tree
-shows no change.
+1. `listen` records the external foreground window before command-bar activation.
+   Direct CLI `submit` captures it automatically. `open` works without a window.
+2. `submit` replaces all prior work and approvals. Resolve the command against a
+   fresh, bounded snapshot of that captured window. Match enabled labels uniquely;
+   never guess coordinates or invoke inference.
+3. Publish Running with the highlight, AwaitConfirm with a new increasing ID,
+   Blocked, or Stuck. No action is dispatched on the resolution tick.
+4. A later tick restores the captured window through a policy-approved
+   FocusWindow action if necessary. This consumes that tick's one native action.
+   Failure to restore enters Stuck. Re-resolve the action/target before dispatch;
+   changes revoke any approval and re-enter policy.
+5. Dispatch at most one action per tick, then refresh the tree. Done reports API
+   dispatch plus tree availability, never semantic verification. A failed refresh
+   reports uncertainty in Stuck; no automatic repeat occurs.
 
-## Platform contract
+A command `click <label>` means accessibility Press/Invoke, not coordinate input.
+`press` first recognizes the shared key vocabulary, then tries an enabled label.
+Unsupported chords, reserved Escape and ambiguous/missing labels enter Stuck.
+The shell rejects injecting its own configured summon chord. Text suffixes are
+preserved verbatim and never placed in state messages or diagnostic Agent output.
 
-Each platform crate must pass `offhand_platform::contract::run_contract_tests`.
-The contract tests use the same fixtures on both operating systems. A
-difference in behaviour goes into [`platform-matrix.md`](platform-matrix.md).
+Paused, AwaitConfirm, Blocked and Stuck ticks perform no action. Stop clears all
+pending work and emits Idle. Resume from Paused or Stuck explicitly starts fresh
+resolution and revokes approval. A confirmation response must match the currently
+pending globally increasing ID. Allow queues dispatch for a later tick; Skip
+completes this single-step run; Stop clears it. Block has no allow path. Approval
+never carries to a changed target, a replacement command or another step.
 
-## Data boundaries
+Policy confirms risky labels, password-role or password-label typing, unknown
+focused targets, multiline text, non-navigation keys/chords and system-settings
+launches. Permanent empty-trash/recycle-bin labels are blocked. App names reject
+URLs, paths, control characters and option prefixes. Native launchers receive
+one name argument (macOS `open -a`) or ShellExecute with no extra arguments,
+never a shell command string.
 
-| Data | Stays on device | Leaves device |
-|---|---|---|
-| Screen frames | Always, unless T3 is on | Only to the T3 provider the user chose |
-| Accessibility tree | Always, unless T3 is on | Only to the T3 provider the user chose |
-| Model weights | Downloaded once from Hugging Face | No |
-| Telemetry | None | No |
+## Native snapshot and coordinate contract
+
+`tree(None)` reads the external application's focused window; `tree(Some(id))`
+is pinned even while Offhand is visible. Adapters exclude Offhand's own process,
+retain native references for pending IDs, cap traversal at 2,000 nodes and 32
+levels, and use native call timeouts where available. `focused_element` preserves
+PasswordField even when secure content is unreadable.
+
+Rect and public Bounds use desktop physical pixels, top-left origin, including
+negative coordinates. macOS AX points are converted with the owning display's
+scale; Windows UIA bounds use physical screen coordinates. The overlay subtracts
+its monitor origin and divides by scale to draw CSS pixels. Native point-input
+adapters must invert the same conversion.
+
+macOS Accessibility grants are required for actions; Screen Recording is an
+optional future capture grant. Windows returns None for both grants and cannot
+bypass integrity levels, foreground restrictions or rejected SendInput calls.
+
+## Current limits versus future design
+
+Capture returns Unimplemented on both OSes. NoopEngine returns Unimplemented for
+both Engine methods. No llama.cpp dependency or model call is enabled. Model
+onboarding/settings report unavailable with zero progress; cloud remains disabled
+and the app stores no API key. No undo is offered (`undoable=false`).
+
+AXObserver/UIA invalidation subscriptions and global user-input auto-pause hooks
+are deferred on both platforms. Fresh bounded snapshots replace event-driven
+cache invalidation. Pause/Resume is manual, and Stuck retries only after an
+explicit user action. Point clicks and scrolling are outside this release's
+command grammar even though the shared trait retains those future actions.
+
+The future ladder is T0 tree → T1 local element selection → T2 local visual
+grounding → optional T3 cloud. The reasons are in [thesis.md](thesis.md) and
+[adr/](adr/). Only offhand-cloud may make runtime network connections, behind
+its feature; explicit model-fetch tooling and the app updater are exceptions.
+The current runner performs neither inference nor capture and claims no latency
+benchmark numbers for those paths.
+
+## Evidence limits
+
+The shared contract suite is a placeholder with no assertions. Compilation and
+existing-test target compilation do not prove native parity. Native CI retains
+existing tests and explicitly builds the desktop app and CLI on macOS and Windows.
+Linux cross-checks cannot prove native linking or desktop behavior; the Apple
+check using a C compiler stub checks Rust cfgs only.
+
+Hands-on native checks remain necessary for AX/UIA behavior, foreground
+restoration, integrity denial, permissions, secure fields, hotkeys, focusless and
+capture-protected windows, mixed-DPI placement, materials and semantic outcomes.
+There are no new tests in this implementation workflow.
