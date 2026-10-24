@@ -11,10 +11,10 @@ use llama_cpp_2::model::{LlamaModel, params::LlamaModelParams};
 
 use crate::{Embedder, Error, Result};
 
-/// Retrieval query prefix; callers add it before calling `embed_text`.
-pub use crate::EMBEDDINGGEMMA_QUERY_PREFIX as QUERY_PREFIX;
 /// Retrieval document prefix; callers add it before calling `embed_text`.
 pub use crate::EMBEDDINGGEMMA_DOCUMENT_PREFIX as DOCUMENT_PREFIX;
+/// Retrieval query prefix; callers add it before calling `embed_text`.
+pub use crate::EMBEDDINGGEMMA_QUERY_PREFIX as QUERY_PREFIX;
 
 const CONTEXT: u32 = 2048;
 const DIMENSIONS: usize = 256;
@@ -51,7 +51,10 @@ impl LlamaEmbedder {
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         if !path.is_file() {
-            return Err(Error::Backend(format!("model file missing: {}", path.display())));
+            return Err(Error::Backend(format!(
+                "model file missing: {}",
+                path.display()
+            )));
         }
         let backend = BACKEND
             .get_or_init(|| LlamaBackend::init().map_err(|error| error.to_string()))
@@ -60,14 +63,26 @@ impl LlamaEmbedder {
         // CPU is the portable default; no GPU runtime is required on Windows.
         let params = LlamaModelParams::default().with_n_gpu_layers(0);
         let model = LlamaModel::load_from_file(backend, path, &params).map_err(backend_error)?;
-        if model.meta_val_str("general.architecture").map_err(backend_error)? != "embeddinggemma2" {
-            return Err(Error::Backend("expected an embeddinggemma2 GGUF model".into()));
+        if model
+            .meta_val_str("general.architecture")
+            .map_err(backend_error)?
+            != "embeddinggemma2"
+        {
+            return Err(Error::Backend(
+                "expected an embeddinggemma2 GGUF model".into(),
+            ));
         }
         if model.n_embd_out() < 256 {
-            return Err(Error::Backend("model output has fewer than 256 dimensions".into()));
+            return Err(Error::Backend(
+                "model output has fewer than 256 dimensions".into(),
+            ));
         }
         // Validate context allocation now so the factory can fall back on failure.
-        drop(model.new_context(backend, context_params()).map_err(backend_error)?);
+        drop(
+            model
+                .new_context(backend, context_params())
+                .map_err(backend_error)?,
+        );
         Ok(Self {
             model: Mutex::new(model),
             backend,
@@ -84,7 +99,10 @@ impl Embedder for LlamaEmbedder {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
-        let model = self.model.lock().map_err(|error| backend_error(error.to_string()))?;
+        let model = self
+            .model
+            .lock()
+            .map_err(|error| backend_error(error.to_string()))?;
         let mut context = model
             .new_context(self.backend, context_params())
             .map_err(backend_error)?;
@@ -99,12 +117,16 @@ impl Embedder for LlamaEmbedder {
             }
             let tokens = model.vocab().tokenize(text.as_bytes(), true, false);
             if tokens.is_empty() || tokens.len() > CONTEXT as usize {
-                return Err(Error::Backend("embedding input must fit 1..=2048 tokens".into()));
+                return Err(Error::Backend(
+                    "embedding input must fit 1..=2048 tokens".into(),
+                ));
             }
             context.clear_kv_cache();
             batch.clear();
             // Every token participates in mean pooling, in a single microbatch.
-            batch.add_sequence(&tokens, 0, true).map_err(backend_error)?;
+            batch
+                .add_sequence(&tokens, 0, true)
+                .map_err(backend_error)?;
             context.decode(&mut batch).map_err(backend_error)?;
             let pooled = context.embeddings_seq_ith(0).map_err(backend_error)?;
             embeddings.push(normalise_truncated(pooled)?);
@@ -137,7 +159,10 @@ fn normalise_truncated(pooled: &[f32]) -> Result<Vec<f32>> {
     if norm == 0.0 || !norm.is_finite() {
         return Err(Error::Backend("zero or invalid embedding norm".into()));
     }
-    Ok(truncated.iter().map(|&value| (f64::from(value) / norm) as f32).collect())
+    Ok(truncated
+        .iter()
+        .map(|&value| (f64::from(value) / norm) as f32)
+        .collect())
 }
 
 fn backend_error(error: impl std::fmt::Display) -> Error {
