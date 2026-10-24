@@ -1,7 +1,7 @@
 //! Inference engine interface.
 //!
 //! The `llama-cpp-2` backend lands after the week-1 spike (ADR-0002); until then this crate
-//! only defines the [`Engine`] trait.
+//! defines the [`Engine`] and [`Embedder`] seams without a native runtime.
 
 use offhand_platform::{Element, Frame};
 
@@ -46,4 +46,105 @@ impl Engine for NoopEngine {
     fn ground(&self, _frame: &Frame, _task: &str) -> Result<(f64, f64)> {
         Err(Error::Unimplemented)
     }
+}
+
+/// EmbeddingGemma retrieval prefix for a task phrase.
+pub const EMBEDDINGGEMMA_QUERY_PREFIX: &str = "task: search result | query: ";
+
+/// EmbeddingGemma retrieval prefix for an accessibility label without a title.
+pub const EMBEDDINGGEMMA_DOCUMENT_PREFIX: &str = "title: none | text: ";
+
+/// A local text embedding backend; implementations must not open network connections.
+pub trait Embedder: std::fmt::Debug + Send + Sync {
+    /// Number of components returned for each text, after any truncation.
+    fn dims(&self) -> usize;
+
+    /// Embed already-prefixed texts in order, returning one finite vector per text.
+    ///
+    /// Each vector must have [`Self::dims`] components. Return an error when the
+    /// backend is unavailable; callers retain their original candidates on failure.
+    fn embed(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>;
+}
+
+/// Unavailable embedding backend for the v0.1 seam; no weights are loaded.
+#[derive(Debug, Default)]
+pub struct NoopEmbedder;
+
+impl Embedder for NoopEmbedder {
+    fn dims(&self) -> usize {
+        0
+    }
+
+    fn embed(&self, _texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        Err(Error::Unimplemented)
+    }
+}
+
+/// Cosine similarity, or zero for mismatched lengths, zero norms or non-finite input.
+///
+/// Accumulation uses f64 to avoid overflow for finite f32 components.
+#[must_use]
+pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
+    if a.len() != b.len() {
+        return 0.0;
+    }
+    let (mut dot, mut norm_a, mut norm_b) = (0.0_f64, 0.0_f64, 0.0_f64);
+    for (&a, &b) in a.iter().zip(b) {
+        if !a.is_finite() || !b.is_finite() {
+            return 0.0;
+        }
+        let (a, b) = (f64::from(a), f64::from(b));
+        dot += a * b;
+        norm_a += a * a;
+        norm_b += b * b;
+    }
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0;
+    }
+    (dot / (norm_a.sqrt() * norm_b.sqrt())).clamp(-1.0, 1.0) as f32
+}
+
+/// Rank label indices by descending cosine similarity to a task phrase.
+///
+/// Adds the EmbeddingGemma retrieval prefixes and embeds the query followed by
+/// the labels in one batch. Returns at most `k` indices; ties keep input order.
+/// Empty labels or zero `k` return an empty list without invoking the backend.
+/// Backend errors and malformed batches return an error, never a partial ranking.
+/// This only ranks candidates; it does not select or authorize an action.
+pub fn shortlist(
+    embedder: &dyn Embedder,
+    query: &str,
+    labels: &[&str],
+    k: usize,
+) -> Result<Vec<usize>> {
+    if labels.is_empty() || k == 0 {
+        return Ok(Vec::new());
+    }
+    let texts: Vec<String> = std::iter::once(format!("{EMBEDDINGGEMMA_QUERY_PREFIX}{query}"))
+        .chain(
+            labels
+                .iter()
+                .map(|label| format!("{EMBEDDINGGEMMA_DOCUMENT_PREFIX}{label}")),
+        )
+        .collect();
+    let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+    let vectors = embedder.embed(&refs)?;
+    let dims = embedder.dims();
+    if dims == 0
+        || vectors.len() != texts.len()
+        || vectors
+            .iter()
+            .any(|vector| vector.len() != dims || vector.iter().any(|value| !value.is_finite()))
+    {
+        return Err(Error::Backend("invalid embedding batch shape or values".into()));
+    }
+    let mut scores: Vec<_> = vectors[1..]
+        .iter()
+        .enumerate()
+        .map(|(index, vector)| (index, cosine(&vectors[0], vector)))
+        .collect();
+    scores.sort_by(|(a_index, a), (b_index, b)| {
+        b.total_cmp(a).then_with(|| a_index.cmp(b_index))
+    });
+    Ok(scores.into_iter().take(k).map(|(index, _)| index).collect())
 }

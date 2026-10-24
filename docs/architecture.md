@@ -93,6 +93,11 @@ bypass integrity levels, foreground restrictions or rejected SendInput calls.
 
 ## Current limits versus future design
 
+The optional embeddings seam is defined in [ADR-0005](adr/0005-embeddings.md).
+It prepares a semantic label shortlist before future T1 `Engine::choose` calls;
+the v0.1 runner never invokes it. Embedding failure preserves the original
+candidate order, and ranking never bypasses policy or confirmation.
+
 Capture returns Unimplemented on both OSes. NoopEngine returns Unimplemented for
 both Engine methods. No llama.cpp dependency or model call is enabled. Model
 onboarding/settings report unavailable with zero progress; cloud remains disabled

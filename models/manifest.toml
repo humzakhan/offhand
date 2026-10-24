@@ -11,6 +11,17 @@ sha256 = "TBD"
 license = "Apache-2.0"
 
 [[model]]
+id = "embeddinggemma-300m"
+role = "optional label embedder (v0.2)"
+# https://huggingface.co/ggml-org/embeddinggemma-300M-GGUF
+repo = "ggml-org/embeddinggemma-300M-GGUF"
+file = "embeddinggemma-300M-Q8_0.gguf"
+# Verify the selected artifact and pin its SHA-256 before enabling downloads.
+sha256 = "TBD"
+# Legal review is required before default download; this is not Apache-2.0.
+license = "Gemma Terms of Use"
+
+[[model]]
 id = "ui-venus-1.5-2b"
 role = "small"
 repo = "inclusionAI/UI-Venus-1.5-2B"

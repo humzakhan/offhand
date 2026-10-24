@@ -1,6 +1,6 @@
 //! Deterministic, accessibility-first single-command runner.
 
-use offhand_infer::Engine;
+use offhand_infer::{Embedder, Engine};
 use offhand_platform::{Action, Element, Platform, WindowId};
 use offhand_policy::Risk;
 use serde::{Deserialize, Serialize};
@@ -230,6 +230,7 @@ enum Stage {
 pub struct Agent<P: Platform, E: Engine> {
     platform: P,
     _engine: E,
+    embedder: Option<Box<dyn Embedder>>,
     state: UiState,
     subscribers: Vec<Sender<UiState>>,
     command: Option<Command>,
@@ -239,6 +240,7 @@ pub struct Agent<P: Platform, E: Engine> {
     confirmation_id: u64,
     approved: bool,
     revalidation_mismatches: u8,
+    focus_failures: u8,
 }
 
 // Do not expose command text or typed secrets through diagnostic formatting.
@@ -257,6 +259,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
         Self {
             platform,
             _engine: engine,
+            embedder: None,
             state: UiState::Idle,
             subscribers: Vec::new(),
             command: None,
@@ -266,6 +269,41 @@ impl<P: Platform, E: Engine> Agent<P, E> {
             confirmation_id: 0,
             approved: false,
             revalidation_mismatches: 0,
+            focus_failures: 0,
+        }
+    }
+
+    /// Attach a local embedder for future T1 candidate preparation.
+    ///
+    /// This does not enable inference in the deterministic v0.1 runner.
+    #[must_use]
+    pub fn with_embedder(mut self, embedder: Box<dyn Embedder>) -> Self {
+        self.embedder = Some(embedder);
+        self
+    }
+
+    /// Prepare a semantic shortlist immediately before a future [`Engine::choose`] call.
+    ///
+    /// The v0.1 T0 runner never calls this seam. Without an embedder, or on any
+    /// embedding error, returns every candidate in its original order, ignoring
+    /// `k`. Successful ranking returns at most `k` candidates. Missing labels use
+    /// empty text so indices always refer to the original candidate slice.
+    /// Ranking grants no approval; selected actions must still pass policy.
+    #[must_use]
+    pub fn shortlist_candidates(&self, query: &str, candidates: &[Element], k: usize) -> Vec<Element> {
+        let Some(embedder) = self.embedder.as_deref() else {
+            return candidates.to_vec();
+        };
+        let labels: Vec<_> = candidates
+            .iter()
+            .map(|element| element.label.as_deref().unwrap_or_default())
+            .collect();
+        match offhand_infer::shortlist(embedder, query, &labels, k) {
+            Ok(indices) => indices
+                .into_iter()
+                .map(|index| candidates[index].clone())
+                .collect(),
+            Err(_) => candidates.to_vec(),
         }
     }
 
@@ -357,12 +395,23 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                         self.stuck("Window restoration was rejected");
                         return Ok(());
                     }
-                    self.platform.act(&action)?;
+                    // Record the attempt before dispatch so failures cannot retry forever.
+                    self.focus_failures += 1;
+                    if self.platform.act(&action).is_err() {
+                        if self.focus_failures >= 2 {
+                            self.stuck(
+                                "Window restoration failed twice; inspect permissions and retry explicitly",
+                            );
+                        }
+                        return Ok(());
+                    }
+                    self.focus_failures = 0;
                     self.stage = Stage::Ready {
                         focus_wait: Some(0),
                     };
                     return Ok(());
                 }
+                self.focus_failures = 0;
                 let Some(current) = self.resolve()? else {
                     return Ok(());
                 };
@@ -541,6 +590,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                 self.pending = None;
                 self.approved = false;
                 self.revalidation_mismatches = 0;
+                self.focus_failures = 0;
                 self.stage = Stage::Resolve;
                 self.running(None);
             } else {
@@ -559,6 +609,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
 
     fn clear_task(&mut self) {
         self.command = None;
+        self.focus_failures = 0;
         self.revalidation_mismatches = 0;
         self.pending = None;
         self.approved = false;
