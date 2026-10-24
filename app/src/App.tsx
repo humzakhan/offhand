@@ -12,7 +12,7 @@ function Key({ children }: { children: ReactNode }) { return <kbd>{children}</kb
 function Badge() { return <span className="badge"><i /> tree · local</span>; }
 function Brand() { return <div className="brand"><span className="mark">↗</span><div><strong>Offhand</strong><small>Your computer. A little more capable.</small></div></div>; }
 function useAgentState() {
-  const [event, setEvent] = useState<StateEvent>({ revision: 0, ui: { state: "idle" } });
+  const [event, setEvent] = useState<StateEvent>({ revision: 0, ui: { state: "idle" }, armed: false });
   useEffect(() => {
     const unlisten = listen<StateEvent>("offhand://state", ({ payload }) => setEvent(old => payload.revision > old.revision ? payload : old));
     return () => { void unlisten.then(fn => fn()); };
@@ -62,7 +62,7 @@ function Overlay({ event }: { event: StateEvent }) {
     </div>}
   </main>;
 }
-function Confirmation({ ui }: { ui: UiState }) {
+function Confirmation({ ui, armed }: { ui: UiState; armed: boolean }) {
   const [error, setError] = useState("");
   useEffect(() => setError(""), [ui]);
   if (ui.state !== "await_confirm" && ui.state !== "blocked") return null;
@@ -73,7 +73,7 @@ function Confirmation({ ui }: { ui: UiState }) {
   return <main className={`confirmation glass ${blocked ? "blocked" : ""}`} onKeyDown={e => { if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) { e.preventDefault(); e.stopPropagation(); } }}>
     <div className="card-heading"><span className={`state-icon ${blocked ? "red" : "amber"}`}>{blocked ? "⊘" : "!"}</span><div><h2>{blocked ? "This action is blocked" : `Press “${ui.label}”?`}</h2><p>{ui.state === "await_confirm" ? ui.app : ui.label}</p></div></div>
     {ui.state === "await_confirm" && ui.detail && <p className="detail">{ui.detail}</p>}
-    {blocked ? <><p className="detail">Permanent deletion is never automatic. Offhand has stopped here.</p><button className="button" onClick={() => decide("stop")}>OK <Key>esc</Key></button></> : <div className="actions"><button className="button allow" onClick={() => decide("allow")}>Allow <Key>{primary} ↵</Key></button><button className="button" onClick={() => decide("skip")}>Skip <Key>⇥</Key></button><button className="quiet" onClick={() => decide("stop")}>Stop <Key>esc</Key></button></div>}
+    {blocked ? <><p className="detail">Offhand’s safety policy prevents this action. You can dismiss this card to stop the run.</p><button tabIndex={-1} className="button" onClick={() => decide("stop")}>OK <Key>esc</Key></button></> : <div className="actions"><button tabIndex={-1} disabled={!armed} className="button allow" onClick={() => decide("allow")}>Allow <Key>{primary} ↵</Key></button><button tabIndex={-1} className="button" onClick={() => decide("skip")}>Skip <Key>⇥</Key></button><button tabIndex={-1} className="quiet" onClick={() => decide("stop")}>Stop <Key>esc</Key></button></div>}
     {error && <p className="error" role="alert">{error}</p>}
   </main>;
 }
@@ -130,7 +130,7 @@ function Preferences({ firstRun }: { firstRun: boolean }) {
 function AgentSurface() {
   const event = useAgentState();
   if (surface === "overlay") return <Overlay event={event} />;
-  if (surface === "confirm") return <Confirmation ui={event.ui} />;
+  if (surface === "confirm") return <Confirmation ui={event.ui} armed={event.armed} />;
   return <Command ui={event.ui} />;
 }
 export default function App() {

@@ -1,9 +1,23 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
+use tauri_plugin_global_shortcut::{Modifiers, Shortcut};
 
 use crate::AppError;
+
+/// Summon must have a primary modifier and must not shadow scoped safety keys.
+pub fn validate_hotkey(hotkey: &str) -> Result<Shortcut, AppError> {
+    if hotkey.len() > 80 { return Err(AppError::shortcut("Shortcut is too long")); }
+    let key = Shortcut::from_str(hotkey).map_err(AppError::shortcut)?;
+    if !key.mods.intersects(Modifiers::CONTROL | Modifiers::ALT | Modifiers::SUPER)
+        || ["Escape", "Tab", "CommandOrControl+Enter"].iter()
+            .filter_map(|reserved| Shortcut::from_str(reserved).ok()).any(|reserved| reserved == key)
+    {
+        return Err(AppError::shortcut("Use Ctrl, Alt, or Super, and avoid the approval shortcut"));
+    }
+    Ok(key)
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -57,7 +71,13 @@ impl Preferences {
     pub fn load(app: &AppHandle) -> Result<Self, AppError> {
         let path = Self::path(app)?;
         match fs::read(path) {
-            Ok(bytes) => serde_json::from_slice(&bytes).map_err(AppError::storage),
+            Ok(bytes) => {
+                let mut preferences: Self = serde_json::from_slice(&bytes).map_err(AppError::storage)?;
+                if validate_hotkey(&preferences.hotkey).is_err() {
+                    preferences.hotkey = Self::default().hotkey;
+                }
+                Ok(preferences)
+            },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(AppError::storage(e)),
         }

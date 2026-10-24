@@ -86,9 +86,10 @@ pub async fn offhand_confirm(
     request: Request<'_>,
     bridge: State<'_, Bridge>,
 ) -> Result<(), AppError> {
+    let received_at = std::time::Instant::now();
     let args: ConfirmArgs = arguments(&window, &request, &["confirm"])?;
     bridge
-        .ask(move |reply| Control::Confirm(args.confirmation_id, args.decision, reply))
+        .ask(move |reply| Control::Confirm(args.confirmation_id, args.decision, received_at, reply))
         .await
 }
 #[tauri::command(rename_all = "snake_case")]

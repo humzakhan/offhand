@@ -322,7 +322,7 @@ fn sync_geometry(app: &AppHandle) {
     }
 }
 
-pub fn emit(app: &AppHandle, revision: u64, ui: &UiState) {
+pub fn emit(app: &AppHandle, revision: u64, ui: &UiState, armed: bool) {
     sync_geometry(app);
     let materials = app.state::<NativeMaterials>();
     for label in ["command", "confirm"] {
@@ -339,6 +339,6 @@ pub fn emit(app: &AppHandle, revision: u64, ui: &UiState) {
     }
     let _ = app.emit(
         "offhand://state",
-        serde_json::json!({"revision":revision,"ui":ui}),
+        serde_json::json!({"revision":revision,"ui":ui,"armed":armed}),
     );
 }

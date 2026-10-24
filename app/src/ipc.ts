@@ -9,7 +9,7 @@ export type UiState =
   | { state: "blocked"; label: string; target: Target | null }
   | { state: "stuck"; query: string; cloud_available: boolean }
   | { state: "done"; summary: string; undoable: boolean };
-export type StateEvent = { revision: number; ui: UiState };
+export type StateEvent = { revision: number; ui: UiState; armed: boolean };
 export type Permissions = { accessibility: boolean | null; screen_recording: boolean | null };
 export type Settings = {
   platform: "macos" | "windows" | "unsupported";

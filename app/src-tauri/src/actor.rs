@@ -13,7 +13,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 use crate::{
     AppError, desktop,
-    settings::{PermissionSnapshot, Preferences, SettingsSnapshot},
+    settings::{PermissionSnapshot, Preferences, SettingsSnapshot, validate_hotkey},
 };
 
 type Reply<T> = mpsc::Sender<Result<T, AppError>>;
@@ -25,11 +25,11 @@ pub enum Control {
     Blur,
     Pause,
     Resume,
-    Decide(u64, ConfirmationDecision),
+    Decide(u64, ConfirmationDecision, Instant),
     Quit,
     Submit(String, Reply<()>),
     Stop(Option<Reply<()>>),
-    Confirm(u64, ConfirmationDecision, Reply<()>),
+    Confirm(u64, ConfirmationDecision, Instant, Reply<()>),
     Settings(Reply<SettingsSnapshot>),
     Hotkey(String, Reply<SettingsSnapshot>),
     Permissions(Reply<PermissionSnapshot>),
@@ -155,18 +155,7 @@ fn new_hotkey(
     prefs: &mut Preferences,
     hotkey: &str,
 ) -> Result<SettingsSnapshot, AppError> {
-    let key = Shortcut::from_str(hotkey).map_err(AppError::shortcut)?;
-    if hotkey.len() > 80
-        || !hotkey.contains('+')
-        || ["Escape", "Tab", "CommandOrControl+Enter"]
-            .iter()
-            .filter_map(|s| Shortcut::from_str(s).ok())
-            .any(|reserved| reserved == key)
-    {
-        return Err(AppError::shortcut(
-            "Choose a modified shortcut other than Escape, Tab, or the approval shortcut",
-        ));
-    }
+    let key = validate_hotkey(hotkey)?;
     if Shortcut::from_str(&prefs.hotkey).ok() == Some(key) {
         if !app.global_shortcut().is_registered(key) {
             bind(app, hotkey, bridge, || Control::Summon)?;
@@ -212,6 +201,18 @@ fn is_summon_command(command: &str, hotkey: &str) -> bool {
     matches!((Shortcut::from_str(&parts.join("+")), Shortcut::from_str(hotkey)), (Ok(a),Ok(b)) if a == b)
 }
 
+#[derive(Debug)]
+struct ConfirmationGate {
+    id: u64,
+    armed_at: Instant,
+    announced: bool,
+}
+impl ConfirmationGate {
+    fn allows(&self, id: u64, received_at: Instant) -> bool {
+        self.id == id && received_at >= self.armed_at
+    }
+}
+
 #[allow(clippy::too_many_lines)] // One owner loop keeps controls ordered before every native tick.
 fn run<P: Platform>(
     app: &AppHandle,
@@ -247,8 +248,17 @@ fn run<P: Platform>(
     let mut primary = false;
     let mut skip = false;
     let mut command_visible = false;
+    let mut confirmation_gate: Option<ConfirmationGate> = None;
     loop {
-        let first = match receiver.recv_timeout(Duration::from_millis(20)) {
+        let now = Instant::now();
+        let mut deadline = (last_emit + Duration::from_millis(250)).min(last_tray + Duration::from_secs(60));
+        if matches!(agent.state(), UiState::Running { .. }) {
+            deadline = deadline.min(last_tick + Duration::from_millis(110));
+        }
+        if let Some((_, since)) = done_since { deadline = deadline.min(since + Duration::from_secs(3)); }
+        if let Some(gate) = &confirmation_gate && !gate.announced { deadline = deadline.min(gate.armed_at); }
+        let timeout = deadline.saturating_duration_since(now).clamp(Duration::from_millis(20), Duration::from_millis(250));
+        let first = match receiver.recv_timeout(timeout) {
             Ok(message) => Some(message),
             Err(mpsc::RecvTimeoutError::Timeout) => None,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -326,8 +336,12 @@ fn run<P: Platform>(
                         let _ = reply.send(Ok(()));
                     }
                 }
-                Control::Confirm(id, decision, reply) => {
-                    let result = if matches!(agent.state(), UiState::Blocked { .. })
+                Control::Confirm(id, decision, received_at, reply) => {
+                    let result = if decision == ConfirmationDecision::Allow
+                        && !confirmation_gate.as_ref().is_some_and(|gate| gate.allows(id, received_at))
+                    {
+                        Err(AppError::with("confirmation_unarmed", "Wait until the confirmation card is ready"))
+                    } else if matches!(agent.state(), UiState::Blocked { .. })
                         && id == 0
                         && decision == ConfirmationDecision::Stop
                     {
@@ -350,10 +364,13 @@ fn run<P: Platform>(
                         report_error(app, &mut shell_error, AppError::core(error));
                     }
                 }
-                Control::Decide(id, decision) => {
-                    // The binding carries the ID that was visible when it was installed.
-                    // A queued key can never approve a replacement confirmation.
-                    let _ = agent.respond(id, decision);
+                Control::Decide(id, decision, received_at) => {
+                    // Keep both identity and input time: an early queued key never arms later.
+                    if decision != ConfirmationDecision::Allow
+                        || confirmation_gate.as_ref().is_some_and(|gate| gate.allows(id, received_at))
+                    {
+                        let _ = agent.respond(id, decision);
+                    }
                 }
                 Control::Settings(reply) => {
                     let _ = reply.send(Ok(prefs.snapshot()));
@@ -390,7 +407,7 @@ fn run<P: Platform>(
                 }
             }
         }
-        if last_tick.elapsed() >= Duration::from_millis(110) {
+        if matches!(agent.state(), UiState::Running { .. }) && last_tick.elapsed() >= Duration::from_millis(110) {
             if agent.tick().is_err() {
                 // Core enters Stuck and retains the task for an explicit retry.
                 remember(&mut recent, "✕ Native operation failed");
@@ -413,6 +430,14 @@ fn run<P: Platform>(
                     report_error(app, &mut shell_error, error);
                     continue;
                 }
+                desktop::render(app, &ui);
+                desktop::emit(app, revision, &ui, false);
+                // Start the delay only after the native card has been shown.
+                confirmation_gate = if let UiState::AwaitConfirm { confirmation_id, .. } = &ui {
+                    app.get_webview_window("confirm")
+                        .filter(|window| window.is_visible().unwrap_or(false))
+                        .map(|_| ConfirmationGate { id: *confirmation_id, armed_at: Instant::now() + Duration::from_millis(400), announced: false })
+                } else { None };
                 // State-scoped keys never remain installed after the applicable state ends.
                 if primary {
                     let _ = unbind(app, "CommandOrControl+Enter");
@@ -428,11 +453,11 @@ fn run<P: Platform>(
                 {
                     let id = *confirmation_id;
                     primary = bind(app, "CommandOrControl+Enter", bridge, move || {
-                        Control::Decide(id, ConfirmationDecision::Allow)
+                        Control::Decide(id, ConfirmationDecision::Allow, Instant::now())
                     })
                     .is_ok();
                     skip = bind(app, "Tab", bridge, move || {
-                        Control::Decide(id, ConfirmationDecision::Skip)
+                        Control::Decide(id, ConfirmationDecision::Skip, Instant::now())
                     })
                     .is_ok();
                 } else if matches!(ui, UiState::Paused | UiState::Stuck { .. }) {
@@ -448,13 +473,18 @@ fn run<P: Platform>(
                 if let UiState::Blocked { label, .. } = &ui {
                     remember(&mut recent, &format!("✕ Blocked: {label}"));
                 }
-                desktop::render(app, &ui);
                 if let Some(error) = &shell_error {
                     desktop::show_error(app, error);
                 }
-                desktop::emit(app, revision, &ui);
                 let _ = desktop::tray(app, &ui, &recent, &prefs.hotkey);
             }
+        }
+        if let Some(gate) = &mut confirmation_gate
+            && !gate.announced && Instant::now() >= gate.armed_at
+        {
+            gate.announced = true;
+            revision += 1;
+            desktop::emit(app, revision, &ui, true);
         }
         if done_since.is_some_and(|(r, t)| r == revision && t.elapsed() >= Duration::from_secs(3)) {
             agent.stop();
@@ -466,7 +496,7 @@ fn run<P: Platform>(
                 .values()
                 .any(|window| window.is_visible().unwrap_or(false))
             {
-                desktop::emit(app, revision, &ui);
+                desktop::emit(app, revision, &ui, confirmation_gate.as_ref().is_some_and(|gate| gate.announced));
             }
             if let Some(error) = &shell_error {
                 desktop::replay_error(app, error);
