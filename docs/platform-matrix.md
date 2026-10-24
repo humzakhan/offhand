@@ -1,23 +1,44 @@
 # Platform matrix
 
-This table records each capability on macOS and Windows. A row that is not
-equal on both platforms needs a reason in the Notes column. TODO: `cargo xtask
-parity-check` is planned. Once it exists, it will fail if a row has a value in
-one column only.
+The v0.1 target is equal deterministic T0 functionality on macOS and Windows.
+The implementation below still needs native interactive verification; a Linux
+cross-check is not a parity proof. The shared contract suite has no assertions.
+`cargo xtask parity-check` is a future tool.
 
 | Capability | macOS | Windows | Notes |
 |---|---|---|---|
-| Read UI tree | planned (AXUIElement) | planned (UI Automation) | Chromium on Windows needs accessibility on |
-| Capture window | planned (ScreenCaptureKit) | planned (Windows.Graphics.Capture) | |
-| Press element | planned (AXPress) | planned (Invoke pattern) | |
-| Click at point | planned (CGEvent) | planned (SendInput) | SendInput fails into higher-integrity processes |
-| Type text | planned (CGEvent) | planned (SendInput) | |
-| Window-change events | planned (AXObserver) | planned (UIA events) | |
-| Overlay hidden from capture | planned (Tauri) | planned (Tauri) | Week-1 spike |
-| GPU inference | planned (Metal) | planned (CUDA, Vulkan) | |
-| NPU inference | not planned | stretch | Snapdragon only, if tested |
-| Permissions prompt | Accessibility, Screen Recording | none for UIA | macOS grants need a stable signature |
-| Hotkey | planned (⌥Space) | planned (Alt+Space) | Alt is the Windows equivalent of ⌥. It overrides the window system menu, so first run lets the user change it |
-| Permissions step in first run | planned (Accessibility, Screen Recording) | none | Windows has no grants to request, so first run has three steps instead of four |
-| Tray position | planned (menu bar, top right) | planned (notification area, bottom right) | Set by the OS. The status pill sits 20 px above the screen edge on macOS and above the taskbar on Windows |
-| Window material | planned (vibrancy) | planned (Mica or Acrylic) | Each OS has its own translucent material. Both need an opaque fallback |
+| Bounded external-window tree | AXUIElement | UI Automation | Up to 2,000 nodes / 32 levels; native responsiveness varies |
+| Enabled label invocation | AXPress | Invoke pattern | Unique exact label, then unique case-insensitive substring |
+| Secure field identity | PasswordField | PasswordField / IsPassword | Content need not be readable; typing requires confirmation |
+| Text input | CGEvent Unicode | SendInput UTF-16 | Captured-window restoration required; unknown focus requires confirmation |
+| Key/chord input | CGEvent | SendInput | Shared vocabulary; primary=Cmd / Ctrl; actual meta key stays distinct |
+| Application launch | open -a, one name argument | ShellExecute, no arguments | No shell strings, paths, URLs or options; settings apps require confirmation |
+| Captured-window restoration | AX/native activation | HWND foreground restoration | Failure enters Stuck; never silently type elsewhere |
+| Capture | Unimplemented | Unimplemented | Screen Recording is optional/future for T0 |
+| Model inference/download | Unavailable | Unavailable | NoopEngine; zero progress; no model dependency or fake readiness |
+| Cloud / API key | Disabled / not stored | Disabled / not stored | Feature remains default-off; no app opt-in in this release |
+| Undo | Unavailable | Unavailable | Done always has undoable=false |
+| AXObserver/UIA invalidation | Deferred | Deferred | Fresh snapshots at resolution/revalidation/verification boundaries |
+| User-input auto-pause | Deferred | Deferred | Tray/manual Pause/Resume only; mouse movement does not pause |
+| Stuck continuation | Explicit retry | Explicit retry | Cmd+Enter / Ctrl+Enter; no automatic continuation after manual input |
+| Point click / scroll commands | Outside T0 grammar | Outside T0 grammar | Shared Action variants remain for future work |
+| Native grants | Accessibility required; Screen Recording optional | No equivalent grant | Windows integrity levels and foreground rules can deny input |
+| Summon shortcut | Option+Space | Alt+Space | Configurable; Windows system-menu shortcut is overridden |
+| Allow / Resume | Cmd+Enter | Ctrl+Enter | State-scoped bindings; plain Enter never approves |
+| Stop / Skip | Escape / Tab | Escape / Tab | Escape while active; Tab only during confirmation |
+| Setup | Hotkey → Permissions → Model → Try it | Hotkey → Model → Try it | Model pane honestly unavailable; no download required for tree commands |
+| Tray | Menu bar | Notification area | Pause/Resume and up to three real recent results |
+| Overlay coordinates | AX points converted to physical pixels | Physical UIA screen pixels | Desktop top-left origin, negative coordinates allowed; overlay converts per monitor |
+| Content protection / click-through | Native Tauri protection | Native Tauri protection | Requires native verification; compile does not prove exclusion |
+| Window material | Best-effort vibrancy | Best-effort Mica/Acrylic | Opaque graphite fallback; native appearance unverified |
+| CLI | Native adapter | Native adapter | Same runner; Linux reports unsupported (exit 2) |
+
+Existing native CI tests are retained and CI links both the app and CLI. No new
+tests run in the implementation workflow. Apple cross-checks with a stub C
+compiler check Rust types only; Windows cross-checks do not link or exercise an
+OS session. Permission prompts, secure typing, foreground behavior, hotkeys,
+content protection and mixed-DPI placement require later hands-on checks.
+
+No capture/inference latency numbers are claimed because these execution paths
+remain unavailable. Semantic task outcomes also remain unverified: Done means
+the native dispatch succeeded and a tree refresh was available.
