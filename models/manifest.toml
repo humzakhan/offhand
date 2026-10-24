@@ -11,15 +11,16 @@ sha256 = "TBD"
 license = "Apache-2.0"
 
 [[model]]
-id = "embeddinggemma-300m"
+id = "embeddinggemma-2"
 role = "optional label embedder (v0.2)"
-# https://huggingface.co/ggml-org/embeddinggemma-300M-GGUF
-repo = "ggml-org/embeddinggemma-300M-GGUF"
-file = "embeddinggemma-300M-Q8_0.gguf"
+# https://huggingface.co/unsloth/embeddinggemma-2-GGUF
+repo = "unsloth/embeddinggemma-2-GGUF"
+# About 310 MB; text tower only. Requires llama.cpp >= 4fbc76d (PR #30054).
+# Vision through mtmd remains unverified.
+file = "embeddinggemma-2-Q8_0.gguf"
 # Verify the selected artifact and pin its SHA-256 before enabling downloads.
 sha256 = "TBD"
-# Legal review is required before default download; this is not Apache-2.0.
-license = "Gemma Terms of Use"
+license = "Apache-2.0"
 
 [[model]]
 id = "ui-venus-1.5-2b"

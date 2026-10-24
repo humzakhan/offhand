@@ -1,6 +1,6 @@
 # Architecture
 
-Offhand v0.1 implements a deterministic accessibility-first runner. Each run
+Offhand v0.1 implements an accessibility-first runner. Each run
 contains one explicit `open`, `click`, `type` or `press` command. The broader
 local-model ladder is a future design, not an enabled fallback. The visual
 reference is [ui.md](ui.md); deliberate v0.1 limits are recorded below and in
@@ -14,7 +14,7 @@ reference is [ui.md](ui.md); deliberate v0.1 limits are recorded below and in
 | `offhand-macos` | AX tree/press, CGEvent input, captured-window activation | macOS APIs |
 | `offhand-windows` | UIA tree/invoke, SendInput, captured-window activation | Windows APIs |
 | `offhand-policy` | Exhaustive Safe / Confirm / Block classification | Shared types only |
-| `offhand-infer` | Engine trait and NoopEngine | No inference in v0.1 |
+| `offhand-infer` | Engine and Embedder traits, default embedder factory and no-op backends | Local label ranking when a backend is installed |
 | `offhand-cloud` | Optional future remote inference | Feature `cloud`, default-off |
 | `offhand-core` | Parsing, pinned target, staged runner, approval identity, UI state | Platform, policy, Engine interface |
 | `offhand-cli` | Native adapter selection, terminal approval and Ctrl+C | Same Agent + NoopEngine |
@@ -38,8 +38,9 @@ Mutating invokes acknowledge actor acceptance, not semantic task completion.
 1. `listen` records the external foreground window before command-bar activation.
    Direct CLI `submit` captures it automatically. `open` works without a window.
 2. `submit` replaces all prior work and approvals. Resolve the command against a
-   fresh, bounded snapshot of that captured window. Match enabled labels uniquely;
-   never guess coordinates or invoke inference.
+   fresh, bounded snapshot of that captured window. With a local embedder, rank
+   enabled labels and select the top target; otherwise match labels uniquely.
+   Embedding errors use the deterministic matcher. Never guess coordinates.
 3. Publish Running with the highlight, AwaitConfirm with a new increasing ID,
    Blocked, or Stuck. No action is dispatched on the resolution tick.
 4. A later tick restores the captured window through a policy-approved
@@ -55,7 +56,9 @@ Mutating invokes acknowledge actor acceptance, not semantic task completion.
 
 A command `click <label>` means accessibility Press/Invoke, not coordinate input.
 `press` first recognizes the shared key vocabulary, then tries an enabled label.
-Unsupported chords, reserved Escape and ambiguous/missing labels enter Stuck.
+Unsupported chords and reserved Escape enter Stuck. Without an embedder,
+ambiguous/missing labels enter Stuck; semantic ranking may resolve those labels
+when an embedder is installed.
 The shell rejects injecting its own configured summon chord. Typing suffixes are
 preserved verbatim; application launch names are trimmed and never placed in state messages or diagnostic Agent output.
 
@@ -93,13 +96,15 @@ bypass integrity levels, foreground restrictions or rejected SendInput calls.
 
 ## Current limits versus future design
 
-The optional embeddings seam is defined in [ADR-0005](adr/0005-embeddings.md).
-It prepares a semantic label shortlist before future T1 `Engine::choose` calls;
-the v0.1 runner never invokes it. Embedding failure preserves the original
-candidate order, and ranking never bypasses policy or confirmation.
+Local embeddings are defined in [ADR-0005](adr/0005-embeddings.md). Agent loads
+the default embedder when available and uses its semantic label ranking during
+target resolution, before policy and confirmation. With no backend or on an
+embedding error, it retains the original deterministic matcher. Future T1 can
+reuse the shortlist before `Engine::choose`.
 
 Capture returns Unimplemented on both OSes. NoopEngine returns Unimplemented for
-both Engine methods. No llama.cpp dependency or model call is enabled. Model
+both Engine methods. This slice adds no llama.cpp dependency; the default
+embedder factory returns None until a backend is integrated. Model
 onboarding/settings report unavailable with zero progress; cloud remains disabled
 and the app stores no API key. No undo is offered (`undoable=false`).
 
@@ -113,8 +118,9 @@ The future ladder is T0 tree → T1 local element selection → T2 local visual
 grounding → optional T3 cloud. The reasons are in [thesis.md](thesis.md) and
 [adr/](adr/). Only offhand-cloud may make runtime network connections, behind
 its feature; explicit model-fetch tooling and the app updater are exceptions.
-The current runner performs neither inference nor capture and claims no latency
-benchmark numbers for those paths.
+The seam-only build performs neither inference nor capture and claims no latency
+benchmark numbers. Enabling an embedding backend requires before-and-after
+benchmarks on both OSes.
 
 ## Evidence limits
 

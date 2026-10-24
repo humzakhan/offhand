@@ -226,7 +226,7 @@ enum Stage {
     Ready { focus_wait: Option<u8> },
 }
 
-/// Drives a platform on its owning thread; inference is deliberately unused in T0.
+/// Drives a platform on its owning thread with optional local label ranking.
 pub struct Agent<P: Platform, E: Engine> {
     platform: P,
     _engine: E,
@@ -259,7 +259,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
         Self {
             platform,
             _engine: engine,
-            embedder: None,
+            embedder: offhand_infer::default_embedder(),
             state: UiState::Idle,
             subscribers: Vec::new(),
             command: None,
@@ -273,37 +273,39 @@ impl<P: Platform, E: Engine> Agent<P, E> {
         }
     }
 
-    /// Attach a local embedder for future T1 candidate preparation.
+    /// Override the default local embedder used to rank accessibility labels.
     ///
-    /// This does not enable inference in the deterministic v0.1 runner.
+    /// Label commands use the highest-ranked enabled target, then enter the
+    /// existing policy and confirmation path. Embedding errors fall back to the
+    /// deterministic label matcher. This does not enable VLM selection or capture.
     #[must_use]
     pub fn with_embedder(mut self, embedder: Box<dyn Embedder>) -> Self {
         self.embedder = Some(embedder);
         self
     }
 
-    /// Prepare a semantic shortlist immediately before a future [`Engine::choose`] call.
-    ///
-    /// The v0.1 T0 runner never calls this seam. Without an embedder, or on any
-    /// embedding error, returns every candidate in its original order, ignoring
-    /// `k`. Successful ranking returns at most `k` candidates. Missing labels use
-    /// empty text so indices always refer to the original candidate slice.
-    /// Ranking grants no approval; selected actions must still pass policy.
-    #[must_use]
-    pub fn shortlist_candidates(&self, query: &str, candidates: &[Element], k: usize) -> Vec<Element> {
+    fn match_label<'a>(&self, tree: &'a [Element], query: &str) -> Option<&'a Element> {
         let Some(embedder) = self.embedder.as_deref() else {
-            return candidates.to_vec();
+            return unique_match(tree, query);
         };
-        let labels: Vec<_> = candidates
+        if query.is_empty() {
+            return None;
+        }
+        // Keep native element identity; embeddings rank only enabled, labeled targets.
+        let candidates: Vec<_> = tree
             .iter()
-            .map(|element| element.label.as_deref().unwrap_or_default())
+            .filter_map(|element| {
+                element
+                    .label
+                    .as_deref()
+                    .filter(|label| element.enabled && !label.trim().is_empty())
+                    .map(|label| (element, label))
+            })
             .collect();
-        match offhand_infer::shortlist(embedder, query, &labels, k) {
-            Ok(indices) => indices
-                .into_iter()
-                .map(|index| candidates[index].clone())
-                .collect(),
-            Err(_) => candidates.to_vec(),
+        let labels: Vec<_> = candidates.iter().map(|(_, label)| *label).collect();
+        match offhand_infer::shortlist(embedder, query, &labels, 1) {
+            Ok(indices) => indices.first().map(|&index| candidates[index].0),
+            Err(_) => unique_match(tree, query),
         }
     }
 
@@ -350,7 +352,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
         Ok(())
     }
 
-    /// Resolve or dispatch at most one native action, without sleeping or inference.
+    /// Resolve or dispatch at most one native action, without sleeping or VLM calls.
     pub fn tick(&mut self) -> Result<()> {
         if !matches!(self.state, UiState::Running { .. }) {
             return Ok(());
@@ -485,7 +487,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
         let (action, element) = match command {
             Command::Click(label) | Command::Press(label) => {
                 let tree = self.platform.tree(Some(window))?;
-                let Some(element) = unique_match(&tree, label.trim()) else {
+                let Some(element) = self.match_label(&tree, label.trim()) else {
                     self.stuck("No unique enabled accessibility label matched; refine the command and retry");
                     return Ok(None);
                 };
