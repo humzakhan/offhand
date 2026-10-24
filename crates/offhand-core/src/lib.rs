@@ -333,8 +333,10 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                 let Some(previous) = self.pending.clone() else {
                     return Ok(());
                 };
+                // Own-process exclusion can make the foreground query unavailable
+                // while the command bar is still hiding. Restore the pinned window.
                 if let Some(window) = previous.window
-                    && self.platform.foreground_window()? != window
+                    && self.platform.foreground_window().ok() != Some(window)
                 {
                     if focus_attempted {
                         self.stuck("The captured window could not be restored");
