@@ -251,13 +251,22 @@ fn run<P: Platform>(
     let mut confirmation_gate: Option<ConfirmationGate> = None;
     loop {
         let now = Instant::now();
-        let mut deadline = (last_emit + Duration::from_millis(250)).min(last_tray + Duration::from_secs(60));
+        let mut deadline =
+            (last_emit + Duration::from_millis(250)).min(last_tray + Duration::from_secs(60));
         if matches!(agent.state(), UiState::Running { .. }) {
             deadline = deadline.min(last_tick + Duration::from_millis(110));
         }
-        if let Some((_, since)) = done_since { deadline = deadline.min(since + Duration::from_secs(3)); }
-        if let Some(gate) = &confirmation_gate && !gate.announced { deadline = deadline.min(gate.armed_at); }
-        let timeout = deadline.saturating_duration_since(now).clamp(Duration::from_millis(20), Duration::from_millis(250));
+        if let Some((_, since)) = done_since {
+            deadline = deadline.min(since + Duration::from_secs(3));
+        }
+        if let Some(gate) = &confirmation_gate
+            && !gate.announced
+        {
+            deadline = deadline.min(gate.armed_at);
+        }
+        let timeout = deadline
+            .saturating_duration_since(now)
+            .clamp(Duration::from_millis(20), Duration::from_millis(250));
         let first = match receiver.recv_timeout(timeout) {
             Ok(message) => Some(message),
             Err(mpsc::RecvTimeoutError::Timeout) => None,
@@ -338,9 +347,14 @@ fn run<P: Platform>(
                 }
                 Control::Confirm(id, decision, received_at, reply) => {
                     let result = if decision == ConfirmationDecision::Allow
-                        && !confirmation_gate.as_ref().is_some_and(|gate| gate.allows(id, received_at))
+                        && !confirmation_gate
+                            .as_ref()
+                            .is_some_and(|gate| gate.allows(id, received_at))
                     {
-                        Err(AppError::with("confirmation_unarmed", "Wait until the confirmation card is ready"))
+                        Err(AppError::with(
+                            "confirmation_unarmed",
+                            "Wait until the confirmation card is ready",
+                        ))
                     } else if matches!(agent.state(), UiState::Blocked { .. })
                         && id == 0
                         && decision == ConfirmationDecision::Stop
@@ -367,7 +381,9 @@ fn run<P: Platform>(
                 Control::Decide(id, decision, received_at) => {
                     // Keep both identity and input time: an early queued key never arms later.
                     if decision != ConfirmationDecision::Allow
-                        || confirmation_gate.as_ref().is_some_and(|gate| gate.allows(id, received_at))
+                        || confirmation_gate
+                            .as_ref()
+                            .is_some_and(|gate| gate.allows(id, received_at))
                     {
                         let _ = agent.respond(id, decision);
                     }
@@ -407,7 +423,9 @@ fn run<P: Platform>(
                 }
             }
         }
-        if matches!(agent.state(), UiState::Running { .. }) && last_tick.elapsed() >= Duration::from_millis(110) {
+        if matches!(agent.state(), UiState::Running { .. })
+            && last_tick.elapsed() >= Duration::from_millis(110)
+        {
             if agent.tick().is_err() {
                 // Core enters Stuck and retains the task for an explicit retry.
                 remember(&mut recent, "✕ Native operation failed");
@@ -433,11 +451,20 @@ fn run<P: Platform>(
                 desktop::render(app, &ui);
                 desktop::emit(app, revision, &ui, false);
                 // Start the delay only after the native card has been shown.
-                confirmation_gate = if let UiState::AwaitConfirm { confirmation_id, .. } = &ui {
+                confirmation_gate = if let UiState::AwaitConfirm {
+                    confirmation_id, ..
+                } = &ui
+                {
                     app.get_webview_window("confirm")
                         .filter(|window| window.is_visible().unwrap_or(false))
-                        .map(|_| ConfirmationGate { id: *confirmation_id, armed_at: Instant::now() + Duration::from_millis(400), announced: false })
-                } else { None };
+                        .map(|_| ConfirmationGate {
+                            id: *confirmation_id,
+                            armed_at: Instant::now() + Duration::from_millis(400),
+                            announced: false,
+                        })
+                } else {
+                    None
+                };
                 // State-scoped keys never remain installed after the applicable state ends.
                 if primary {
                     let _ = unbind(app, "CommandOrControl+Enter");
@@ -480,7 +507,8 @@ fn run<P: Platform>(
             }
         }
         if let Some(gate) = &mut confirmation_gate
-            && !gate.announced && Instant::now() >= gate.armed_at
+            && !gate.announced
+            && Instant::now() >= gate.armed_at
         {
             gate.announced = true;
             revision += 1;
@@ -496,7 +524,14 @@ fn run<P: Platform>(
                 .values()
                 .any(|window| window.is_visible().unwrap_or(false))
             {
-                desktop::emit(app, revision, &ui, confirmation_gate.as_ref().is_some_and(|gate| gate.announced));
+                desktop::emit(
+                    app,
+                    revision,
+                    &ui,
+                    confirmation_gate
+                        .as_ref()
+                        .is_some_and(|gate| gate.announced),
+                );
             }
             if let Some(error) = &shell_error {
                 desktop::replay_error(app, error);
