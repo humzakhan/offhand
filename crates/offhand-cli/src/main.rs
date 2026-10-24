@@ -143,17 +143,17 @@ fn drive(platform: impl Platform, command: &str) -> u8 {
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn print_state(state: &UiState) {
     match state {
-                UiState::Running { target, .. } => {
-                    if let Some(target) = target {
-                        println!("Target: {}", target.label);
-                    } else {
-                        println!("Resolving command");
-                    }
-                }
-                UiState::AwaitConfirm { label, .. } => println!("Confirmation required: {label}"),
-                UiState::Done { summary, .. } => println!("{summary}"),
-                UiState::Stuck { query, .. } => eprintln!("Stuck: {query}"),
-                UiState::Blocked { label, .. } => eprintln!("Blocked: {label}"),
-                UiState::Idle | UiState::Listening | UiState::Paused => {}
+        UiState::Running { target, .. } => {
+            if let Some(target) = target {
+                println!("Target: {}", target.label);
+            } else {
+                println!("Resolving command");
             }
+        }
+        UiState::AwaitConfirm { label, .. } => println!("Confirmation required: {label}"),
+        UiState::Done { summary, .. } => println!("{summary}"),
+        UiState::Stuck { query, .. } => eprintln!("Stuck: {query}"),
+        UiState::Blocked { label, .. } => eprintln!("Blocked: {label}"),
+        UiState::Idle | UiState::Listening | UiState::Paused => {}
+    }
 }

@@ -4,8 +4,8 @@ use offhand_infer::Engine;
 use offhand_platform::{Action, Element, Platform, WindowId};
 use offhand_policy::Risk;
 use serde::{Deserialize, Serialize};
-use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 
 static NEXT_CONFIRMATION_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -336,20 +336,20 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                 if let Some(window) = previous.window
                     && self.platform.foreground_window()? != window
                 {
-                        if focus_attempted {
-                            self.stuck("The captured window could not be restored");
-                            return Ok(());
-                        }
-                        let action = Action::FocusWindow(window);
-                        if offhand_policy::classify(&action, None) != Risk::Safe {
-                            self.stuck("Window restoration was rejected");
-                            return Ok(());
-                        }
-                        self.platform.act(&action)?;
-                        self.stage = Stage::Ready {
-                            focus_attempted: true,
-                        };
+                    if focus_attempted {
+                        self.stuck("The captured window could not be restored");
                         return Ok(());
+                    }
+                    let action = Action::FocusWindow(window);
+                    if offhand_policy::classify(&action, None) != Risk::Safe {
+                        self.stuck("Window restoration was rejected");
+                        return Ok(());
+                    }
+                    self.platform.act(&action)?;
+                    self.stage = Stage::Ready {
+                        focus_attempted: true,
+                    };
+                    return Ok(());
                 }
                 let Some(current) = self.resolve()? else {
                     return Ok(());
