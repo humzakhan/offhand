@@ -16,7 +16,7 @@ use std::{
     ffi::{OsString, c_void},
     mem::size_of,
     os::windows::ffi::{OsStrExt, OsStringExt},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf, Prefix},
     ptr,
     time::{Duration, Instant},
 };
@@ -559,7 +559,8 @@ fn modifier_input(key: u16, up: bool) -> INPUT {
 }
 // Accept names only; extensions other than .exe must never reach file associations.
 fn application_executable(name: &str) -> Result<String> {
-    if name.trim().is_empty()
+    if name.chars().count() > 255
+        || name.trim().is_empty()
         || name != name.trim()
         || name.starts_with('-')
         || name.contains("..")
@@ -579,8 +580,21 @@ fn application_executable(name: &str) -> Result<String> {
     }
 }
 
+fn local_drive_absolute(path: &Path) -> bool {
+    let Some(Component::Prefix(prefix)) = path.components().next() else {
+        return false;
+    };
+    path.is_absolute()
+        && matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
+        && !path
+            .as_os_str()
+            .encode_wide()
+            .skip(prefix.as_os_str().encode_wide().count())
+            .any(|c| c == u16::from(b':'))
+}
+
 fn absolute_executable(path: PathBuf) -> Option<PathBuf> {
-    if !path.is_absolute()
+    if !local_drive_absolute(&path)
         || !path
             .extension()?
             .as_encoded_bytes()
@@ -640,7 +654,7 @@ fn search_application(executable: &str) -> Option<PathBuf> {
         .chain(std::env::split_paths(&path))
         .filter(|dir| {
             // Empty/relative entries can implicitly search the current directory.
-            dir.is_absolute()
+            local_drive_absolute(dir)
                 && dir.canonicalize().is_ok_and(|absolute| {
                     !absolute
                         .as_os_str()
