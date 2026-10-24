@@ -12,10 +12,11 @@ use offhand_platform::{
 };
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     ffi::c_void,
     mem::size_of,
     ptr,
+    time::{Duration, Instant},
 };
 use windows::{
     Win32::{
@@ -41,7 +42,10 @@ use windows::{
         UI::{
             Accessibility::{
                 CUIAutomation8, IUIAutomation2, IUIAutomationElement, IUIAutomationInvokePattern,
-                IUIAutomationTreeWalker, UIA_ButtonControlTypeId, UIA_CheckBoxControlTypeId,
+                IUIAutomationTreeWalker, IUIAutomationTogglePattern, IUIAutomationSelectionItemPattern,
+                IUIAutomationExpandCollapsePattern, UIA_TogglePatternId, UIA_SelectionItemPatternId,
+                UIA_ExpandCollapsePatternId, ExpandCollapseState_Expanded, ExpandCollapseState_LeafNode,
+                UIA_PATTERN_ID, UIA_ButtonControlTypeId, UIA_CheckBoxControlTypeId,
                 UIA_EditControlTypeId, UIA_HyperlinkControlTypeId, UIA_InvokePatternId,
                 UIA_MenuItemControlTypeId,
             },
@@ -56,7 +60,7 @@ use windows::{
             },
         },
     },
-    core::PCWSTR,
+    core::{Interface, PCWSTR},
 };
 
 /// Windows implementation of [`Platform`] using UI Automation and `SendInput`.
@@ -66,7 +70,8 @@ pub struct WindowsPlatform;
 struct State {
     automation: Option<IUIAutomation2>,
     elements: HashMap<ElementId, IUIAutomationElement>,
-    windows: HashMap<WindowId, u32>,
+    windows: VecDeque<(WindowId, u32)>,
+    tree_deadline: Option<Instant>,
     target: Option<WindowId>,
 }
 impl State {
@@ -89,7 +94,8 @@ impl State {
         let state = Self {
             automation: Some(automation),
             elements: HashMap::new(),
-            windows: HashMap::new(),
+            windows: VecDeque::new(),
+            tree_deadline: None,
             target: None,
         };
         // SAFETY: UIA object belongs to the current initialized apartment; values are milliseconds.
@@ -105,8 +111,8 @@ impl State {
     }
     fn target(&mut self, id: WindowId) -> Result<HWND> {
         let hwnd = hwnd(id)?;
-        let expected = self.windows.get(&id).ok_or(Error::WindowNotFound(id))?;
-        if window_pid(hwnd)? != *expected || *expected == own_pid() {
+        let expected = self.windows.iter().find(|(old, _)| *old == id).map(|(_, pid)| *pid).ok_or(Error::WindowNotFound(id))?;
+        if window_pid(hwnd)? != expected || expected == own_pid() {
             return Err(Error::WindowNotFound(id));
         }
         if self.target != Some(id) {
@@ -115,17 +121,25 @@ impl State {
         }
         Ok(hwnd)
     }
+    fn check_tree_deadline(&self) -> Result<()> {
+        if self.tree_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            Err(Error::Other("tree snapshot deadline reached".into()))
+        } else { Ok(()) }
+    }
     fn describe(&mut self, object: &IUIAutomationElement) -> Result<Element> {
+        self.check_tree_deadline()?;
         let id = runtime_id(object)?;
         if !self.elements.contains_key(&id) && self.elements.len() >= 4096 {
             return Err(Error::Other(
                 "UI Automation reference limit reached; recapture target".into(),
             ));
         }
+        self.check_tree_deadline()?;
         // SAFETY: object is retained in this apartment for the duration of every property call.
         let password = unsafe { object.CurrentIsPassword() }
             .map_err(native_error)?
             .as_bool();
+        self.check_tree_deadline()?;
         // SAFETY: live apartment-local UIA receiver.
         let native_role = unsafe { object.CurrentControlType() }.map_err(native_error)?;
         let role = if password {
@@ -143,12 +157,15 @@ impl State {
         } else {
             Role::Other(format!("UIA:{}", native_role.0))
         };
+        self.check_tree_deadline()?;
         // SAFETY: live apartment-local UIA receiver; BSTR ownership is handled by bindings.
         let label = unsafe { object.CurrentName() }
             .map_err(native_error)?
             .to_string();
+        self.check_tree_deadline()?;
         // SAFETY: UIA returns desktop physical pixel coordinates without DPI virtualization.
         let bounds = unsafe { object.CurrentBoundingRectangle() }.map_err(native_error)?;
+        self.check_tree_deadline()?;
         // SAFETY: live apartment-local UIA receiver.
         let enabled = unsafe { object.CurrentIsEnabled() }
             .map_err(native_error)?
@@ -269,34 +286,70 @@ fn walk(
     output: &mut Vec<Element>,
     seen: &mut HashSet<ElementId>,
     remaining: &mut usize,
-) -> Result<()> {
-    if depth >= 32 || *remaining == 0 {
-        return Ok(());
-    }
+) {
+    if depth >= 32 || *remaining == 0 || state.check_tree_deadline().is_err() { return; }
     *remaining -= 1;
     // SAFETY: live receiver on its initialized apartment thread.
-    if unsafe { object.CurrentProcessId() }.map_err(native_error)? as u32 == own_pid() {
-        return Ok(());
-    }
-    let element = state.describe(object)?;
-    if !seen.insert(element.id.clone()) {
-        return Ok(());
-    }
+    let Ok(pid) = (unsafe { object.CurrentProcessId() }) else { return; };
+    if pid as u32 == own_pid() { return; }
+    let Ok(element) = state.describe(object) else { return; };
+    if state.check_tree_deadline().is_err() || !seen.insert(element.id.clone()) { return; }
     output.push(element);
-    if depth + 1 >= 32 || *remaining == 0 {
-        return Ok(());
-    }
+    if depth + 1 >= 32 || *remaining == 0 { return; }
     // SAFETY: live walker and element on the same initialized apartment thread.
-    let mut child = optional_element(unsafe { walker.GetFirstChildElement(object) })?;
+    let mut child = unsafe { walker.GetFirstChildElement(object) }.ok();
     while let Some(current) = child {
-        if *remaining == 0 {
-            break;
-        }
-        walk(state, walker, &current, depth + 1, output, seen, remaining)?;
+        if *remaining == 0 || state.check_tree_deadline().is_err() { break; }
+        walk(state, walker, &current, depth + 1, output, seen, remaining);
+        if state.check_tree_deadline().is_err() { break; }
         // SAFETY: current remains retained until after its sibling is obtained.
-        child = optional_element(unsafe { walker.GetNextSiblingElement(&current) })?;
+        child = unsafe { walker.GetNextSiblingElement(&current) }.ok();
+    }
+}
+fn validate_text(text: &str) -> Result<()> {
+    if text.chars().take(2001).count() > 2000 {
+        return Err(Error::Other("text exceeds 2000 characters".into()));
+    }
+    if text.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\t')) {
+        return Err(Error::Other("unsupported text control character".into()));
     }
     Ok(())
+}
+// A missing pattern permits trying the next pattern. A failed action does not:
+// dispatch may already have happened, so never retry it with another pattern.
+fn pattern<T: Interface>(object: &IUIAutomationElement, id: UIA_PATTERN_ID) -> Result<Option<T>> {
+    // SAFETY: callers pair each pattern ID with its matching interface, on this COM thread.
+    match unsafe { object.GetCurrentPatternAs::<T>(id) } {
+        Ok(value) => Ok(Some(value)),
+        Err(error) if [0x8000_4002_u32 as i32, 0x8000_4003_u32 as i32, 0x8004_0200_u32 as i32].contains(&error.code().0) => Ok(None),
+        Err(error) => Err(native_error(error)),
+    }
+}
+fn press(object: &IUIAutomationElement) -> Result<()> {
+    if let Some(invoke) = pattern::<IUIAutomationInvokePattern>(object, UIA_InvokePatternId)? {
+        // SAFETY: live Invoke interface belongs to the current initialized COM apartment.
+        return unsafe { invoke.Invoke() }.map_err(native_error);
+    }
+    if let Some(toggle) = pattern::<IUIAutomationTogglePattern>(object, UIA_TogglePatternId)? {
+        // SAFETY: live Toggle interface belongs to the current initialized COM apartment.
+        return unsafe { toggle.Toggle() }.map_err(native_error);
+    }
+    if let Some(selection) = pattern::<IUIAutomationSelectionItemPattern>(object, UIA_SelectionItemPatternId)? {
+        // SAFETY: live SelectionItem interface belongs to the current initialized COM apartment.
+        return unsafe { selection.Select() }.map_err(native_error);
+    }
+    if let Some(expand) = pattern::<IUIAutomationExpandCollapsePattern>(object, UIA_ExpandCollapsePatternId)? {
+        // SAFETY: live ExpandCollapse interface belongs to the current initialized COM apartment.
+        let state = unsafe { expand.CurrentExpandCollapseState() }.map_err(native_error)?;
+        if state == ExpandCollapseState_LeafNode { return Err(Error::Unimplemented); }
+        if state == ExpandCollapseState_Expanded {
+            // SAFETY: live interface; current state identifies a collapsible element.
+            return unsafe { expand.Collapse() }.map_err(native_error);
+        }
+        // SAFETY: live interface; the element is collapsed or partially expanded.
+        return unsafe { expand.Expand() }.map_err(native_error);
+    }
+    Err(Error::Unimplemented)
 }
 fn foreground() -> Result<HWND> {
     // SAFETY: GetForegroundWindow has no preconditions.
@@ -490,16 +543,23 @@ impl Platform for WindowsPlatform {
         let id = window.map_or_else(|| self.foreground_window(), Ok)?;
         with_state(|state| {
             let hwnd = state.target(id)?;
-            // SAFETY: HWND was validated; UIA receiver belongs to current initialized apartment.
-            let root =
-                unsafe { state.automation()?.ElementFromHandle(hwnd) }.map_err(native_error)?;
-            // SAFETY: apartment-local UIA receiver.
-            let walker = unsafe { state.automation()?.RawViewWalker() }.map_err(native_error)?;
-            let mut nodes = Vec::new();
-            let mut seen = HashSet::new();
-            walk(state, &walker, &root, 0, &mut nodes, &mut seen, &mut 2000)?;
-            state.elements.retain(|id, _| seen.contains(id));
-            Ok(nodes)
+            let previous_deadline = state.tree_deadline.replace(Instant::now() + Duration::from_millis(2500));
+            let result = (|| {
+                // SAFETY: validated HWND; UIA receiver belongs to this initialized apartment.
+                let Ok(root) = (unsafe { state.automation()?.ElementFromHandle(hwnd) }) else {
+                    return Ok(Vec::new());
+                };
+                if state.check_tree_deadline().is_err() { return Ok(Vec::new()); }
+                // SAFETY: apartment-local UIA receiver.
+                let walker = unsafe { state.automation()?.RawViewWalker() }.map_err(native_error)?;
+                let mut nodes = Vec::new();
+                let mut seen = HashSet::new();
+                walk(state, &walker, &root, 0, &mut nodes, &mut seen, &mut 2000);
+                state.elements.retain(|id, _| seen.contains(id));
+                Ok(nodes)
+            })();
+            state.tree_deadline = previous_deadline;
+            result
         })
     }
     fn capture(&self, _region: Option<Rect>) -> Result<Frame> {
@@ -539,20 +599,22 @@ impl Platform for WindowsPlatform {
                 {
                     return Err(Error::Other("element is disabled".into()));
                 }
-                // SAFETY: typed pattern ID matches the requested interface, both in same apartment.
-                let invoke: IUIAutomationInvokePattern =
-                    unsafe { object.GetCurrentPatternAs(UIA_InvokePatternId) }
-                        .map_err(native_error)?;
-                // SAFETY: retained Invoke pattern on current initialized COM apartment.
-                unsafe { invoke.Invoke() }.map_err(native_error)
+                press(object)
             }),
             Action::Type(text) => {
+                validate_text(text)?;
                 for scalar in text.chars() {
                     let mut units = [0; 2];
                     let mut events = Vec::new();
-                    for &unit in scalar.encode_utf16(&mut units).iter() {
-                        events.push(input(0, unit, KEYEVENTF_UNICODE));
-                        events.push(input(0, unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+                    if matches!(scalar, '\n' | '\t') {
+                        let key = if scalar == '\n' { 0x0d } else { 0x09 };
+                        events.push(input(key, 0, KEYBD_EVENT_FLAGS(0)));
+                        events.push(input(key, 0, KEYEVENTF_KEYUP));
+                    } else {
+                        for &unit in scalar.encode_utf16(&mut units).iter() {
+                            events.push(input(0, unit, KEYEVENTF_UNICODE));
+                            events.push(input(0, unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
+                        }
                     }
                     send(&events)?;
                 }
@@ -582,10 +644,14 @@ impl Platform for WindowsPlatform {
         let id = window_id(hwnd);
         let pid = window_pid(hwnd)?;
         with_state(|state| {
-            if state.windows.len() >= 128 && !state.windows.contains_key(&id) {
-                return Err(Error::Other("window reference limit reached".into()));
+            if state.windows.iter().any(|&(old, old_pid)| old == id && old_pid == pid) { return Ok(id); }
+            state.windows.retain(|&(id, pid)| self::hwnd(id).ok().and_then(|hwnd| window_pid(hwnd).ok()) == Some(pid));
+            if state.windows.len() >= 128 {
+                if let Some(index) = state.windows.iter().position(|(id, _)| Some(*id) != state.target) {
+                    state.windows.remove(index);
+                }
             }
-            state.windows.insert(id, pid);
+            state.windows.push_back((id, pid));
             Ok(id)
         })
     }

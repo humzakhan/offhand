@@ -113,27 +113,27 @@ fn walk(
     output: &mut Vec<Element>,
     cache: &mut Cache,
     remaining: &mut usize,
-) -> Result<()> {
-    if *remaining == 0 || depth >= 32 {
-        return Ok(());
-    }
+) {
+    if *remaining == 0 || depth >= 32 || native::tree_deadline_expired() { return; }
     *remaining -= 1;
-    if object.pid()? == own_pid()? {
-        return Ok(());
-    }
-    let element = describe(object, cache)?;
-    // AX providers can expose cycles; stable IDs also bound duplicate traversal.
-    if output.iter().any(|old| old.id == element.id) {
-        return Ok(());
-    }
+    let Ok(pid) = object.pid() else { return; };
+    if own_pid().ok() == Some(pid) { return; }
+    let Ok(element) = describe(object, cache) else { return; };
+    if native::tree_deadline_expired() || output.iter().any(|old| old.id == element.id) { return; }
     output.push(element);
-    if depth + 1 < 32 && *remaining > 0 {
-        for child in object.children(*remaining)? {
-            if *remaining == 0 {
-                break;
-            }
-            walk(&child, depth + 1, output, cache, remaining)?;
-        }
+    if depth + 1 >= 32 || *remaining == 0 { return; }
+    let Ok(children) = object.children(*remaining) else { return; };
+    for child in children {
+        if *remaining == 0 || native::tree_deadline_expired() { break; }
+        walk(&child, depth + 1, output, cache, remaining);
+    }
+}
+fn validate_text(text: &str) -> Result<()> {
+    if text.chars().take(2001).count() > 2000 {
+        return Err(Error::Other("text exceeds 2000 characters".into()));
+    }
+    if text.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\t')) {
+        return Err(Error::Other("unsupported text control character".into()));
     }
     Ok(())
 }
@@ -188,10 +188,10 @@ impl Platform for MacPlatform {
     fn tree(&self, window: Option<WindowId>) -> Result<Vec<Element>> {
         native::require_trust()?;
         let id = target(window)?;
-        CACHE.with_borrow_mut(|cache| {
+        native::with_tree_deadline(|| CACHE.with_borrow_mut(|cache| {
             let (_, window) = cache.window(id)?;
             let mut nodes = Vec::new();
-            walk(&window, 0, &mut nodes, cache, &mut 2000)?;
+            walk(&window, 0, &mut nodes, cache, &mut 2000);
             // Preserve identities for live nodes, release references absent from the fresh snapshot.
             let live: HashSet<_> = nodes.iter().map(|node| node.id.clone()).collect();
             cache.elements.retain(|_, bucket| {
@@ -200,7 +200,7 @@ impl Platform for MacPlatform {
             });
             cache.element_count = cache.elements.values().map(Vec::len).sum();
             Ok(nodes)
-        })
+        }))
     }
     fn capture(&self, _region: Option<Rect>) -> Result<Frame> {
         Err(Error::Unimplemented)
@@ -240,11 +240,18 @@ impl Platform for MacPlatform {
                 object.perform("AXPress")
             }),
             Action::Type(text) => {
+                validate_text(text)?;
                 // One Unicode scalar per pair avoids splitting a surrogate pair.
                 for scalar in text.chars() {
                     verify_input_target()?;
-                    let mut units = [0; 2];
-                    native::keyboard(0, 0, Some(scalar.encode_utf16(&mut units)))?;
+                    match scalar {
+                        '\n' => native::keyboard(36, 0, None)?,
+                        '\t' => native::keyboard(48, 0, None)?,
+                        _ => {
+                            let mut units = [0; 2];
+                            native::keyboard(0, 0, Some(scalar.encode_utf16(&mut units)))?;
+                        }
+                    }
                 }
                 Ok(())
             }
@@ -269,8 +276,13 @@ impl Platform for MacPlatform {
             if let Some((id, _, _)) = cache.windows.iter().find(|(_, _, old)| old.same(&window)) {
                 return Ok(*id);
             }
+            // A closed AX window can retain a valid app PID, so probe the window itself.
+            cache.windows.retain(|(_, app, window)| app.pid().is_ok() && window.attr("AXRole").is_ok());
             if cache.windows.len() >= 128 {
-                return Err(Error::Other("window reference limit reached".into()));
+                if let Some(index) = cache.windows.iter().position(|(id, _, _)| Some(*id) != cache.target) {
+                    // Removing the tuple releases both retained CF references.
+                    cache.windows.remove(index);
+                }
             }
             cache.next += 1;
             let id = WindowId(cache.next);

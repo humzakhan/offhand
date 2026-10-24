@@ -8,8 +8,10 @@ use core_graphics::{
 use objc2_application_services::{AXIsProcessTrusted, AXUIElement, AXValue, AXValueType};
 use offhand_platform::{Error, Rect, Result};
 use std::{
+    cell::Cell,
     ffi::{CString, c_char, c_void},
     ptr::{self, NonNull},
+    time::{Duration, Instant},
 };
 
 type Ref = *const c_void;
@@ -60,7 +62,8 @@ unsafe extern "C" {
     fn CGRequestScreenCaptureAccess() -> bool;
     fn CGGetDisplaysWithPoint(point: Point, max: u32, displays: *mut u32, count: *mut u32) -> i32;
     fn CGDisplayBounds(display: u32) -> CRect;
-    fn CGDisplayPixelsWide(display: u32) -> usize;
+    fn CGDisplayCopyDisplayMode(display: u32) -> Ref;
+    fn CGDisplayModeGetPixelWidth(mode: Ref) -> usize;
 
     static kCFBooleanTrue: Ref;
 }
@@ -100,10 +103,11 @@ impl Object {
         // Transfer the create reference into our type-erased CF owner.
         std::mem::forget(ax);
         let object = Self::owned(raw)?;
-        object.timeout();
+        object.timeout()?;
         Ok(object)
     }
     fn ax(&self) -> Result<&AXUIElement> {
+        check_tree_deadline()?;
         // SAFETY: self is a live CF object and is type-checked before creating an AX reference.
         if unsafe { CFGetTypeID(self.0) != AXUIElementGetTypeID() } {
             return Err(Error::Other("expected accessibility element".into()));
@@ -111,11 +115,9 @@ impl Object {
         // SAFETY: the type check above established AXUIElement and self retains its lifetime.
         Ok(unsafe { &*self.0.cast::<AXUIElement>() })
     }
-    fn timeout(&self) {
-        if let Ok(ax) = self.ax() {
-            // SAFETY: validated AX element remains retained for the duration of this call.
-            unsafe { ax.set_messaging_timeout(0.15) };
-        }
+    fn timeout(&self) -> Result<()> {
+        // SAFETY: validated AX element remains retained for the duration of this call.
+        status(unsafe { self.ax()?.set_messaging_timeout(0.15) }.0)
     }
     pub(super) fn attr(&self, name: &str) -> Result<Self> {
         self.optional_attr(name)?
@@ -144,7 +146,7 @@ impl Object {
                 "accessibility attribute is not an element".into(),
             ));
         }
-        value.timeout();
+        value.timeout()?;
         Ok(value)
     }
     pub(super) fn children(&self, limit: usize) -> Result<Vec<Self>> {
@@ -176,6 +178,7 @@ impl Object {
         let count = unsafe { CFArrayGetCount(array.0) }.max(0) as usize;
         let mut result = Vec::new();
         for index in 0..count.min(limit) {
+            if tree_deadline_expired() { break; }
             let index = isize::try_from(index).map_err(|e| Error::Other(e.to_string()))?;
             // SAFETY: index is in bounds; array retains its borrowed child during retain.
             let child = unsafe { CFArrayGetValueAtIndex(array.0, index) };
@@ -183,7 +186,7 @@ impl Object {
             if !child.is_null() && unsafe { CFGetTypeID(child) == AXUIElementGetTypeID() } {
                 // SAFETY: child is live and retained by array until this call completes.
                 let child = Self::owned(unsafe { CFRetain(child) })?;
-                child.timeout();
+                child.timeout()?;
                 result.push(child);
             }
         }
@@ -296,7 +299,8 @@ impl Object {
             return Err(Error::Other("element display unavailable".into()));
         }
         // SAFETY: display ID was returned by CoreGraphics.
-        let (frame, pixels) = unsafe { (CGDisplayBounds(display), CGDisplayPixelsWide(display)) };
+        let frame = unsafe { CGDisplayBounds(display) };
+        let pixels = display_pixel_width(display)?;
         let pixels = u32::try_from(pixels).map_err(|e| Error::Other(e.to_string()))?;
         let scale = f64::from(pixels) / frame.size.w;
         if !scale.is_finite() || scale <= 0.0 {
@@ -353,4 +357,29 @@ pub(super) fn keyboard(key: u16, flags: u64, text: Option<&[u16]>) -> Result<()>
         event.post(CGEventTapLocation::HID);
     }
     Ok(())
+}
+
+// Tree reads have a scoped cooperative deadline. Every AX call checks it; a native
+// call already in flight is still bounded by its 150 ms provider timeout.
+thread_local! { static TREE_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) }; }
+struct TreeDeadline(Option<Instant>);
+impl Drop for TreeDeadline {
+    fn drop(&mut self) { TREE_DEADLINE.set(self.0); }
+}
+pub(super) fn with_tree_deadline<T>(operation: impl FnOnce() -> T) -> T {
+    let _guard = TreeDeadline(TREE_DEADLINE.replace(Some(Instant::now() + Duration::from_millis(2500))));
+    operation()
+}
+pub(super) fn tree_deadline_expired() -> bool {
+    TREE_DEADLINE.get().is_some_and(|deadline| Instant::now() >= deadline)
+}
+fn check_tree_deadline() -> Result<()> {
+    if tree_deadline_expired() { Err(Error::Other("tree snapshot deadline reached".into())) } else { Ok(()) }
+}
+fn display_pixel_width(display: u32) -> Result<usize> {
+    // SAFETY: display is an ID returned by CoreGraphics. The copy result is CF-owned
+    // and Object releases the mode exactly once, including on early return.
+    let mode = Object::owned(unsafe { CGDisplayCopyDisplayMode(display) })?;
+    // SAFETY: mode is the live CGDisplayMode returned by the copy call above.
+    Ok(unsafe { CGDisplayModeGetPixelWidth(mode.0) })
 }
