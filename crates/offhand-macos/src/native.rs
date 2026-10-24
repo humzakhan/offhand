@@ -5,12 +5,17 @@ use core_graphics::{
     event::{CGEvent, CGEventFlags, CGEventTapLocation},
     event_source::{CGEventSource, CGEventSourceStateID},
 };
-use objc2_application_services::{AXIsProcessTrusted, AXUIElement, AXValue, AXValueType};
+use objc2_application_services::{
+    AXIsProcessTrusted, AXIsProcessTrustedWithOptions, AXUIElement, AXValue, AXValueType,
+    kAXTrustedCheckOptionPrompt,
+};
+use objc2_core_foundation::{CFBoolean, CFDictionary, CFString};
 use offhand_platform::{Error, Rect, Result};
 use std::{
     cell::Cell,
     ffi::{CString, c_char, c_void},
     ptr::{self, NonNull},
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
 
@@ -321,7 +326,7 @@ fn status(code: i32) -> Result<()> {
     if code == 0 {
         Ok(())
     } else if code == -25211 {
-        Err(Error::PermissionDenied("Accessibility".into()))
+        Err(accessibility_denied())
     } else {
         Err(Error::Other(format!("Accessibility error {code}")))
     }
@@ -342,8 +347,35 @@ pub(super) fn require_trust() -> Result<()> {
     if trusted() {
         Ok(())
     } else {
-        Err(Error::PermissionDenied("Accessibility".into()))
+        Err(accessibility_denied())
     }
+}
+
+const ACCESSIBILITY_DENIED: &str = "Offhand needs Accessibility access. macOS may have shown a prompt; if not, enable the app that runs this command (your terminal for the CLI) in System Settings \u{2192} Privacy & Security \u{2192} Accessibility, then run the command again.";
+static ACCESSIBILITY_PROMPTED: AtomicBool = AtomicBool::new(false);
+
+/// Builds the denial error and asks macOS to show its Accessibility prompt, once per process.
+fn accessibility_denied() -> Error {
+    run_once(&ACCESSIBILITY_PROMPTED, request_trust_prompt);
+    Error::PermissionDenied(ACCESSIBILITY_DENIED.into())
+}
+/// Runs `action` only the first time it is called with `flag`.
+fn run_once(flag: &AtomicBool, action: impl FnOnce()) -> bool {
+    let first = !flag.swap(true, Ordering::SeqCst);
+    if first {
+        action();
+    }
+    first
+}
+fn request_trust_prompt() {
+    let options = CFDictionary::<CFString, CFBoolean>::from_slices(
+        // SAFETY: the extern static is a valid CFString constant initialised by the framework.
+        &[unsafe { kAXTrustedCheckOptionPrompt }],
+        &[CFBoolean::new(true)],
+    );
+    // SAFETY: `options` is a CFDictionary of CFString keys and CFBoolean values, the types
+    // this API documents; it stays alive for the call. The prompt is asynchronous.
+    unsafe { AXIsProcessTrustedWithOptions(Some(options.as_opaque())) };
 }
 pub(super) fn keyboard(key: u16, flags: u64, text: Option<&[u16]>) -> Result<()> {
     let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
@@ -393,4 +425,35 @@ fn display_pixel_width(display: u32) -> Result<usize> {
     let mode = Object::owned(unsafe { CGDisplayCopyDisplayMode(display) })?;
     // SAFETY: mode is the live CGDisplayMode returned by the copy call above.
     Ok(unsafe { CGDisplayModeGetPixelWidth(mode.0) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prompt_action_runs_once() {
+        let flag = AtomicBool::new(false);
+        let mut calls = 0;
+        assert!(run_once(&flag, || calls += 1));
+        assert!(!run_once(&flag, || calls += 1));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn denial_message_is_actionable() {
+        let text = format!("{}", Error::PermissionDenied(ACCESSIBILITY_DENIED.into()));
+        assert!(text.contains("Offhand needs Accessibility access"));
+        assert!(text.contains("Privacy & Security \u{2192} Accessibility"));
+        assert!(text.contains("run the command again"));
+    }
+
+    #[test]
+    fn repeated_denial_stays_fail_closed() {
+        // Skip the real prompt so the test never reaches FFI.
+        ACCESSIBILITY_PROMPTED.store(true, Ordering::SeqCst);
+        for _ in 0..2 {
+            assert!(matches!(accessibility_denied(), Error::PermissionDenied(_)));
+        }
+    }
 }
