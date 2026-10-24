@@ -86,7 +86,7 @@ fn drive(platform: impl Platform, command: &str) -> u8 {
             UiState::Blocked { .. } => return 2,
             UiState::Idle | UiState::Paused => return 130,
             UiState::AwaitConfirm {
-                confirmation_id, ..
+                confirmation_id, label, target, ..
             } => {
                 if !io::stdin().is_terminal() {
                     eprintln!("Confirmation denied: interactive input is required");
@@ -94,7 +94,10 @@ fn drive(platform: impl Platform, command: &str) -> u8 {
                     return 130;
                 }
                 if !reading {
-                    print!("Type allow to approve, or anything else to stop: ");
+                    // No direct libc dependency is available for portable terminal
+                    // input flushing. Approval still requires an interactive TTY.
+                    let target_label = target.as_ref().map_or(label.as_str(), |target| target.label.as_str());
+                    print!("Type allow to approve {label} (target: {target_label}), or anything else to stop: ");
                     if io::stdout().flush().is_err() {
                         agent.stop();
                         return 1;

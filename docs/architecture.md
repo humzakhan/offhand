@@ -44,17 +44,20 @@ Mutating invokes acknowledge actor acceptance, not semantic task completion.
    Blocked, or Stuck. No action is dispatched on the resolution tick.
 4. A later tick restores the captured window through a policy-approved
    FocusWindow action if necessary. This consumes that tick's one native action.
-   Failure to restore enters Stuck. Re-resolve the action/target before dispatch;
-   changes revoke any approval and re-enter policy.
-5. Dispatch at most one action per tick, then refresh the tree. Done reports API
-   dispatch plus tree availability, never semantic verification. A failed refresh
-   reports uncertainty in Stuck; no automatic repeat occurs.
+   Allow up to five subsequent ticks for foreground activation to settle;
+   failure enters Stuck. Re-resolve the action/target before dispatch; changes
+   revoke any approval and re-enter policy. Three consecutive revalidation
+   mismatches enter Stuck rather than looping indefinitely.
+5. Dispatch at most one action per tick, then clear the command before refreshing
+   the tree. Done reports API dispatch, never semantic verification. A failed
+   refresh produces Done with an explicitly unverified result; neither Resume nor
+   another tick can repeat a successful dispatch.
 
 A command `click <label>` means accessibility Press/Invoke, not coordinate input.
 `press` first recognizes the shared key vocabulary, then tries an enabled label.
 Unsupported chords, reserved Escape and ambiguous/missing labels enter Stuck.
-The shell rejects injecting its own configured summon chord. Text suffixes are
-preserved verbatim and never placed in state messages or diagnostic Agent output.
+The shell rejects injecting its own configured summon chord. Typing suffixes are
+preserved verbatim; application launch names are trimmed and never placed in state messages or diagnostic Agent output.
 
 Paused, AwaitConfirm, Blocked and Stuck ticks perform no action. Stop clears all
 pending work and emits Idle. Resume from Paused or Stuck explicitly starts fresh

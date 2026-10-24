@@ -8,7 +8,7 @@ cross-check is not a parity proof. The shared contract suite has no assertions.
 | Capability | macOS | Windows | Notes |
 |---|---|---|---|
 | Bounded external-window tree | AXUIElement | UI Automation | Up to 2,000 nodes / 32 levels; native responsiveness varies |
-| Enabled label invocation | AXPress | Invoke pattern | Unique exact label, then unique case-insensitive substring |
+| Enabled label invocation | AXPress | Invoke pattern | Unique exact → case-insensitive exact → substring; disabled exact blocks fallback |
 | Secure field identity | PasswordField | PasswordField / IsPassword | Content need not be readable; typing requires confirmation |
 | Text input | CGEvent Unicode | SendInput UTF-16 | Captured-window restoration required; unknown focus requires confirmation |
 | Key/chord input | CGEvent | SendInput | Shared vocabulary; primary=Cmd / Ctrl; actual meta key stays distinct |
@@ -41,4 +41,5 @@ content protection and mixed-DPI placement require later hands-on checks.
 
 No capture/inference latency numbers are claimed because these execution paths
 remain unavailable. Semantic task outcomes also remain unverified: Done means
-the native dispatch succeeded and a tree refresh was available.
+the native dispatch succeeded. A failed tree refresh is reported as unverified
+in Done and never leaves a retryable dispatched command.
