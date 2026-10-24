@@ -10,7 +10,11 @@ use crate::{
     actor::{Bridge, Control},
 };
 
+#[derive(Debug)]
+struct NativeMaterials(Vec<String>);
+
 pub fn create_windows(app: &AppHandle) -> tauri::Result<()> {
+    let mut materials = Vec::new();
     for (label, width, height, floating) in [
         ("command", 640.0, 96.0, true),
         ("overlay", 800.0, 600.0, true),
@@ -46,15 +50,18 @@ pub fn create_windows(app: &AppHandle) -> tauri::Result<()> {
         if floating && label != "overlay" {
             // Native material is optional; the CSS graphite surface remains the fallback.
             #[cfg(target_os = "macos")]
-            let _ = window.set_effects(tauri::utils::config::WindowEffectsConfig {
+            let native_material = window.set_effects(tauri::utils::config::WindowEffectsConfig {
                 effects: vec![tauri::window::Effect::HudWindow],
                 ..Default::default()
-            });
+            }).is_ok();
             #[cfg(target_os = "windows")]
-            let _ = window.set_effects(tauri::utils::config::WindowEffectsConfig {
+            let native_material = window.set_effects(tauri::utils::config::WindowEffectsConfig {
                 effects: vec![tauri::window::Effect::Acrylic],
                 ..Default::default()
-            });
+            }).is_ok();
+            #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+            let native_material = false;
+            if native_material { materials.push(label.to_owned()); }
         }
         let handle = app.clone();
         let label = label.to_owned();
@@ -73,6 +80,7 @@ pub fn create_windows(app: &AppHandle) -> tauri::Result<()> {
             _ => {}
         });
     }
+    app.manage(NativeMaterials(materials));
     Ok(())
 }
 
@@ -309,6 +317,13 @@ fn sync_geometry(app: &AppHandle) {
 
 pub fn emit(app: &AppHandle, revision: u64, ui: &UiState) {
     sync_geometry(app);
+    let materials = app.state::<NativeMaterials>();
+    for label in ["command", "confirm"] {
+        if let Some(window) = app.get_webview_window(label) {
+            let material = if materials.0.iter().any(|name| name == label) { "native" } else { "fallback" };
+            let _ = window.eval(format!("document.documentElement.dataset.material='{material}'"));
+        }
+    }
     let _ = app.emit(
         "offhand://state",
         serde_json::json!({"revision":revision,"ui":ui}),
