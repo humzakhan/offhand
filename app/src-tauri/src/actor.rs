@@ -29,7 +29,7 @@ impl Bridge {
         tauri::async_runtime::spawn_blocking(move || {
             let (tx,rx) = mpsc::channel();
             sender.send(message(tx)).map_err(|_| AppError::actor("Agent thread is unavailable"))?;
-            rx.recv_timeout(Duration::from_secs(10)).map_err(|_| AppError::actor("Agent did not acknowledge the request"))?
+            rx.recv().map_err(|_| AppError::actor("Agent thread closed before acknowledging the request"))?
         }).await.map_err(AppError::actor)?
     }
 }
@@ -60,12 +60,14 @@ pub fn start(app: AppHandle, receiver: mpsc::Receiver<Control>, bridge: Bridge) 
     std::thread::spawn(move || {
         // Native adapters and COM-bearing objects are constructed and remain on this thread.
         #[cfg(target_os = "macos")]
+        #[allow(clippy::default_constructed_unit_structs)]
         let platform = offhand_macos::MacPlatform::default();
         #[cfg(target_os = "windows")]
+        #[allow(clippy::default_constructed_unit_structs)]
         let platform = offhand_windows::WindowsPlatform::default();
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         let platform = UnsupportedPlatform;
-        run(app, receiver, bridge, platform);
+        run(&app, &receiver, &bridge, platform);
     });
 }
 
@@ -87,7 +89,7 @@ fn ensure_escape(app: &AppHandle, bridge: &Bridge, registered: &mut bool) -> Res
     }
     Ok(())
 }
-fn new_hotkey(app: &AppHandle, bridge: &Bridge, prefs: &mut Preferences, hotkey: String) -> Result<SettingsSnapshot, AppError> {
+fn new_hotkey(app: &AppHandle, bridge: &Bridge, prefs: &mut Preferences, hotkey: &str) -> Result<SettingsSnapshot, AppError> {
     let key = Shortcut::from_str(&hotkey).map_err(AppError::shortcut)?;
     if hotkey.len() > 80 || !hotkey.contains('+') || ["Escape", "Tab", "CommandOrControl+Enter"].iter().filter_map(|s| Shortcut::from_str(s).ok()).any(|reserved| reserved == key) {
         return Err(AppError::shortcut("Choose a modified shortcut other than Escape, Tab, or the approval shortcut"));
@@ -96,7 +98,7 @@ fn new_hotkey(app: &AppHandle, bridge: &Bridge, prefs: &mut Preferences, hotkey:
     // Keep the old registration until the replacement is registered and saved.
     bind(app,&hotkey,bridge,|| Control::Summon)?;
     let old = prefs.clone();
-    prefs.hotkey = hotkey.clone();
+    hotkey.clone_into(&mut prefs.hotkey);
     if let Err(error) = prefs.save(app) {
         *prefs = old; let _ = unbind(app,&hotkey); return Err(error);
     }
@@ -115,16 +117,17 @@ fn is_summon_command(command: &str, hotkey: &str) -> bool {
     matches!((Shortcut::from_str(&parts.join("+")), Shortcut::from_str(hotkey)), (Ok(a),Ok(b)) if a == b)
 }
 
-fn run<P: Platform>(app: AppHandle, receiver: mpsc::Receiver<Control>, bridge: Bridge, platform: P) {
+#[allow(clippy::too_many_lines)] // One owner loop keeps controls ordered before every native tick.
+fn run<P: Platform>(app: &AppHandle, receiver: &mpsc::Receiver<Control>, bridge: &Bridge, platform: P) {
     let platform = Rc::new(platform);
     let mut agent = Agent::new(SharedPlatform(Rc::clone(&platform)),NoopEngine);
     let states = agent.subscribe();
-    let mut prefs = match Preferences::load(&app) {
+    let mut prefs = match Preferences::load(app) {
         Ok(prefs) => prefs,
-        Err(error) => { desktop::show_error(&app,&error); Preferences::default() }
+        Err(error) => { desktop::show_error(app,&error); Preferences::default() }
     };
-    if let Err(error) = bind(&app,&prefs.hotkey,&bridge,|| Control::Summon) { desktop::show_error(&app,&error); }
-    if !prefs.first_run_complete { desktop::show_preferences(&app,"first-run"); }
+    if let Err(error) = bind(app,&prefs.hotkey,bridge,|| Control::Summon) { desktop::show_error(app,&error); }
+    if !prefs.first_run_complete { desktop::show_preferences(app,"first-run"); }
     let mut revision = 0_u64;
     let mut ui = UiState::Idle;
     let mut last_tick = Instant::now();
@@ -147,9 +150,9 @@ fn run<P: Platform>(app: AppHandle, receiver: mpsc::Receiver<Control>, bridge: B
             match message {
                 Control::Summon => {
                     agent.stop(); command_visible = false;
-                    match ensure_escape(&app,&bridge,&mut escape).and_then(|()| agent.listen().map_err(AppError::core)) {
+                    match ensure_escape(app,bridge,&mut escape).and_then(|()| agent.listen().map_err(AppError::core)) {
                         Ok(()) => { command_visible = true; },
-                        Err(error) => { agent.stop(); desktop::show_error(&app,&error); }
+                        Err(error) => { agent.stop(); desktop::show_error(app,&error); }
                     }
                 }
                 Control::Submit(command,reply) => {
@@ -158,10 +161,10 @@ fn run<P: Platform>(app: AppHandle, receiver: mpsc::Receiver<Control>, bridge: B
                     } else if is_summon_command(&command,&prefs.hotkey) {
                         Err(AppError::input("The summon shortcut cannot be sent to another app"))
                     } else {
-                        ensure_escape(&app,&bridge,&mut escape).and_then(|()| {
+                        ensure_escape(app,bridge,&mut escape).and_then(|()| {
                             // Set before hide: its queued blur must never stop the submitted run.
                             command_visible = false;
-                            desktop::hide(&app,"command");
+                            desktop::hide(app,"command");
                             agent.submit(&command).map_err(AppError::core)
                         })
                     };
@@ -170,7 +173,7 @@ fn run<P: Platform>(app: AppHandle, receiver: mpsc::Receiver<Control>, bridge: B
                 }
                 Control::Blur => { if command_visible && matches!(agent.state(),UiState::Listening) { command_visible = false; agent.stop(); } }
                 Control::Stop(reply) => {
-                    if !matches!(agent.state(),UiState::Idle | UiState::Listening | UiState::Done {..}) { remember(&mut recent,"✕ Stopped".into()); }
+                    if !matches!(agent.state(),UiState::Idle | UiState::Listening | UiState::Done {..}) { remember(&mut recent,"✕ Stopped"); }
                     command_visible = false; agent.stop();
                     if let Some(reply) = reply { let _ = reply.send(Ok(())); }
                 }
@@ -181,18 +184,18 @@ fn run<P: Platform>(app: AppHandle, receiver: mpsc::Receiver<Control>, bridge: B
                     let _ = reply.send(result);
                 }
                 Control::Pause => { if matches!(agent.state(),UiState::Running {..}) { agent.pause(); } }
-                Control::Resume => { if matches!(agent.state(),UiState::Paused | UiState::Stuck {..}) { if let Err(error) = agent.resume() { desktop::show_error(&app,&AppError::core(error)); } } }
+                Control::Resume => { if matches!(agent.state(),UiState::Paused | UiState::Stuck {..}) && let Err(error) = agent.resume() { desktop::show_error(app,&AppError::core(error)); } }
                 Control::Allow | Control::Skip => {
                     if let UiState::AwaitConfirm {confirmation_id,..} = agent.state() {
                         let id = *confirmation_id;
                         let decision = if matches!(message,Control::Allow) { ConfirmationDecision::Allow } else { ConfirmationDecision::Skip };
-                        if let Err(error) = agent.respond(id,decision) { desktop::show_error(&app,&AppError::core(error)); }
+                        if let Err(error) = agent.respond(id,decision) { desktop::show_error(app,&AppError::core(error)); }
                     }
                 }
                 Control::Settings(reply) => { let _ = reply.send(Ok(prefs.snapshot())); }
                 Control::Hotkey(hotkey,reply) => {
-                    let result = new_hotkey(&app,&bridge,&mut prefs,hotkey);
-                    let _ = desktop::tray(&app,agent.state(),&recent,&prefs.hotkey);
+                    let result = new_hotkey(app,bridge,&mut prefs,&hotkey);
+                    let _ = desktop::tray(app,agent.state(),&recent,&prefs.hotkey);
                     let _ = reply.send(result);
                 }
                 Control::Permissions(reply) => { let _ = reply.send(Ok(platform.permissions().into())); }
@@ -202,48 +205,51 @@ fn run<P: Platform>(app: AppHandle, receiver: mpsc::Receiver<Control>, bridge: B
                 }
                 Control::CompleteSetup(reply) => {
                     prefs.first_run_complete = true;
-                    let result = prefs.save(&app);
-                    if result.is_ok() { desktop::hide(&app,"first-run"); } else { prefs.first_run_complete = false; }
+                    let result = prefs.save(app);
+                    if result.is_ok() { desktop::hide(app,"first-run"); } else { prefs.first_run_complete = false; }
                     let _ = reply.send(result);
                 }
                 Control::Quit => { agent.stop(); app.exit(0); return; }
             }
         }
         if last_tick.elapsed() >= Duration::from_millis(110) {
-            if let Err(error) = agent.tick() { agent.stop(); desktop::show_error(&app,&AppError::core(error)); }
+            if let Err(error) = agent.tick() { agent.stop(); desktop::show_error(app,&AppError::core(error)); }
             last_tick = Instant::now();
         }
-        while let Ok(next) = states.try_recv() {
-            if next == ui && revision != 0 { continue; }
+        if let Some(next) = states.try_iter().last() {
+            if next == ui && revision != 0 {
+                // A late webview still receives the periodic state below.
+            } else {
             ui = next; revision += 1;
-            if matches!(ui,UiState::Idle) { if escape { let _ = unbind(&app,"Escape"); escape = false; } }
-            else if let Err(error) = ensure_escape(&app,&bridge,&mut escape) { agent.stop(); desktop::show_error(&app,&error); continue; }
+            if matches!(ui,UiState::Idle) && escape { let _ = unbind(app,"Escape"); escape = false; }
+            else if let Err(error) = ensure_escape(app,bridge,&mut escape) { agent.stop(); desktop::show_error(app,&error); continue; }
             // State-scoped keys never remain installed after the applicable state ends.
-            if primary { let _ = unbind(&app,"CommandOrControl+Enter"); primary = false; }
-            if skip { let _ = unbind(&app,"Tab"); skip = false; }
+            if primary { let _ = unbind(app,"CommandOrControl+Enter"); primary = false; }
+            if skip { let _ = unbind(app,"Tab"); skip = false; }
             if matches!(ui,UiState::AwaitConfirm {..}) {
-                primary = bind(&app,"CommandOrControl+Enter",&bridge,|| Control::Allow).is_ok();
-                skip = bind(&app,"Tab",&bridge,|| Control::Skip).is_ok();
+                primary = bind(app,"CommandOrControl+Enter",bridge,|| Control::Allow).is_ok();
+                skip = bind(app,"Tab",bridge,|| Control::Skip).is_ok();
             } else if matches!(ui,UiState::Paused | UiState::Stuck {..}) {
-                primary = bind(&app,"CommandOrControl+Enter",&bridge,|| Control::Resume).is_ok();
+                primary = bind(app,"CommandOrControl+Enter",bridge,|| Control::Resume).is_ok();
             }
             done_since = if let UiState::Done {summary,..} = &ui {
-                remember(&mut recent,format!("✓ {summary}")); Some((revision,Instant::now()))
+                remember(&mut recent,&format!("✓ {summary}")); Some((revision,Instant::now()))
             } else { None };
-            if let UiState::Blocked {label,..} = &ui { remember(&mut recent,format!("✕ Blocked: {label}")); }
-            desktop::render(&app,&ui);
-            desktop::emit(&app,revision,&ui);
-            let _ = desktop::tray(&app,&ui,&recent,&prefs.hotkey);
+            if let UiState::Blocked {label,..} = &ui { remember(&mut recent,&format!("✕ Blocked: {label}")); }
+            desktop::render(app,&ui);
+            desktop::emit(app,revision,&ui);
+            let _ = desktop::tray(app,&ui,&recent,&prefs.hotkey);
+            }
         }
         if done_since.is_some_and(|(r,t)| r == revision && t.elapsed() >= Duration::from_secs(3)) { agent.stop(); done_since = None; }
         if last_emit.elapsed() >= Duration::from_millis(250) {
-            if !matches!(ui,UiState::Idle) { desktop::emit(&app,revision,&ui); }
+            if !matches!(ui,UiState::Idle) { desktop::emit(app,revision,&ui); }
             last_emit = Instant::now();
         }
-        if last_tray.elapsed() >= Duration::from_secs(60) { let _ = desktop::tray(&app,&ui,&recent,&prefs.hotkey); last_tray = Instant::now(); }
+        if last_tray.elapsed() >= Duration::from_secs(60) { let _ = desktop::tray(app,&ui,&recent,&prefs.hotkey); last_tray = Instant::now(); }
     }
 }
-fn remember(recent: &mut Vec<(String,Instant)>, summary: String) {
+fn remember(recent: &mut Vec<(String,Instant)>, summary: &str) {
     recent.push((summary.chars().take(90).collect(),Instant::now()));
     if recent.len() > 3 { recent.remove(0); }
 }

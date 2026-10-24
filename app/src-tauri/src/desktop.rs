@@ -30,15 +30,15 @@ pub fn create_windows(app: &AppHandle) -> tauri::Result<()> {
             .visible(false)
             .build()?;
         if label == "overlay" { window.set_ignore_cursor_events(true)?; }
-        if floating {
+        if floating && label != "overlay" {
             // Native material is optional; the CSS graphite surface remains the fallback.
             #[cfg(target_os = "macos")]
             let _ = window.set_effects(tauri::utils::config::WindowEffectsConfig {
-                effects: vec![tauri::utils::config::WindowEffect::HudWindow], ..Default::default()
+                effects: vec![tauri::window::Effect::HudWindow], ..Default::default()
             });
             #[cfg(target_os = "windows")]
             let _ = window.set_effects(tauri::utils::config::WindowEffectsConfig {
-                effects: vec![tauri::utils::config::WindowEffect::Acrylic], ..Default::default()
+                effects: vec![tauri::window::Effect::Acrylic], ..Default::default()
             });
         }
         let handle = app.clone();
@@ -71,7 +71,7 @@ pub fn show_error(app: &AppHandle, error: &AppError) {
     if let Some(window) = app.get_webview_window("command") {
         let message = serde_json::to_string(&error.message).unwrap_or_default();
         let _ = window.show(); let _ = window.set_focus();
-        let _ = window.eval(&format!("window.dispatchEvent(new CustomEvent('offhand-error',{{detail:{message}}}))"));
+        let _ = window.eval(format!("window.dispatchEvent(new CustomEvent('offhand-error',{{detail:{message}}}))"));
     }
 }
 
@@ -96,7 +96,7 @@ pub fn place(app: &AppHandle, target: Option<&Target>) {
         let _ = overlay.set_position(*pos); let _ = overlay.set_size(*size);
         let bottom = (f64::from(pos.y) + f64::from(size.height) - f64::from(work.position.y) - f64::from(work.size.height)) / scale + 20.0;
         let geometry = serde_json::json!({"x":pos.x,"y":pos.y,"scale":scale,"bottom":bottom});
-        let _ = overlay.eval(&format!("window.__OFFHAND_MONITOR__={geometry}"));
+        let _ = overlay.eval(format!("window.__OFFHAND_MONITOR__={geometry}"));
     }
     if let Some(command) = app.get_webview_window("command") {
         let x = f64::from(work.position.x) + (f64::from(work.size.width) - 640.0 * scale) / 2.0;
