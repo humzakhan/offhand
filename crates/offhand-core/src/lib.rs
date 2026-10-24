@@ -5,6 +5,9 @@ use offhand_platform::{Action, Element, Platform, WindowId};
 use offhand_policy::Risk;
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_CONFIRMATION_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Escalation ladder retained for future local inference backends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -330,8 +333,9 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                 let Some(previous) = self.pending.clone() else {
                     return Ok(());
                 };
-                if let Some(window) = previous.window {
-                    if self.platform.foreground_window()? != window {
+                if let Some(window) = previous.window
+                    && self.platform.foreground_window()? != window
+                {
                         if focus_attempted {
                             self.stuck("The captured window could not be restored");
                             return Ok(());
@@ -346,7 +350,6 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                             focus_attempted: true,
                         };
                         return Ok(());
-                    }
                 }
                 let Some(current) = self.resolve()? else {
                     return Ok(());
@@ -441,10 +444,9 @@ impl<P: Platform, E: Engine> Agent<P, E> {
         match risk {
             Risk::Safe => self.running(target),
             Risk::Confirm => {
-                self.confirmation_id = self
-                    .confirmation_id
-                    .checked_add(1)
-                    .ok_or(Error::ConfirmationExhausted)?;
+                self.confirmation_id = NEXT_CONFIRMATION_ID
+                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+                    .map_err(|_| Error::ConfirmationExhausted)?;
                 self.emit(UiState::AwaitConfirm {
                     confirmation_id: self.confirmation_id,
                     label,

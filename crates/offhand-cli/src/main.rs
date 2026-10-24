@@ -77,20 +77,7 @@ fn drive(platform: impl Platform, command: &str) -> u8 {
         }
         let state = agent.state().clone();
         if previous.as_ref() != Some(&state) {
-            match &state {
-                UiState::Running { target, .. } => {
-                    if let Some(target) = target {
-                        println!("Target: {}", target.label);
-                    } else {
-                        println!("Resolving command");
-                    }
-                }
-                UiState::AwaitConfirm { label, .. } => println!("Confirmation required: {label}"),
-                UiState::Done { summary, .. } => println!("{summary}"),
-                UiState::Stuck { query, .. } => eprintln!("Stuck: {query}"),
-                UiState::Blocked { label, .. } => eprintln!("Blocked: {label}"),
-                UiState::Idle | UiState::Listening | UiState::Paused => {}
-            }
+            print_state(&state);
             previous = Some(state.clone());
         }
         match state {
@@ -151,4 +138,22 @@ fn drive(platform: impl Platform, command: &str) -> u8 {
         }
         std::thread::sleep(Duration::from_millis(110));
     }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn print_state(state: &UiState) {
+    match state {
+                UiState::Running { target, .. } => {
+                    if let Some(target) = target {
+                        println!("Target: {}", target.label);
+                    } else {
+                        println!("Resolving command");
+                    }
+                }
+                UiState::AwaitConfirm { label, .. } => println!("Confirmation required: {label}"),
+                UiState::Done { summary, .. } => println!("{summary}"),
+                UiState::Stuck { query, .. } => eprintln!("Stuck: {query}"),
+                UiState::Blocked { label, .. } => eprintln!("Blocked: {label}"),
+                UiState::Idle | UiState::Listening | UiState::Paused => {}
+            }
 }
