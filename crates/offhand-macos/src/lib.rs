@@ -278,11 +278,10 @@ impl Platform for MacPlatform {
             }
             // A closed AX window can retain a valid app PID, so probe the window itself.
             cache.windows.retain(|(_, app, window)| app.pid().is_ok() && window.attr("AXRole").is_ok());
-            if cache.windows.len() >= 128 {
-                if let Some(index) = cache.windows.iter().position(|(id, _, _)| Some(*id) != cache.target) {
-                    // Removing the tuple releases both retained CF references.
-                    cache.windows.remove(index);
-                }
+            if cache.windows.len() >= 128
+                && let Some(index) = cache.windows.iter().position(|(id, _, _)| Some(*id) != cache.target) {
+                // Removing the tuple releases both retained CF references.
+                cache.windows.remove(index);
             }
             cache.next += 1;
             let id = WindowId(cache.next);

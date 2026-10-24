@@ -321,7 +321,7 @@ fn pattern<T: Interface>(object: &IUIAutomationElement, id: UIA_PATTERN_ID) -> R
     // SAFETY: callers pair each pattern ID with its matching interface, on this COM thread.
     match unsafe { object.GetCurrentPatternAs::<T>(id) } {
         Ok(value) => Ok(Some(value)),
-        Err(error) if [0x8000_4002_u32 as i32, 0x8000_4003_u32 as i32, 0x8004_0200_u32 as i32].contains(&error.code().0) => Ok(None),
+        Err(error) if [0x8000_4002_u32 as i32, 0x8000_4003_u32 as i32, 0x8004_0204_u32 as i32].contains(&error.code().0) => Ok(None),
         Err(error) => Err(native_error(error)),
     }
 }
@@ -646,10 +646,9 @@ impl Platform for WindowsPlatform {
         with_state(|state| {
             if state.windows.iter().any(|&(old, old_pid)| old == id && old_pid == pid) { return Ok(id); }
             state.windows.retain(|&(id, pid)| self::hwnd(id).ok().and_then(|hwnd| window_pid(hwnd).ok()) == Some(pid));
-            if state.windows.len() >= 128 {
-                if let Some(index) = state.windows.iter().position(|(id, _)| Some(*id) != state.target) {
-                    state.windows.remove(index);
-                }
+            if state.windows.len() >= 128
+                && let Some(index) = state.windows.iter().position(|(id, _)| Some(*id) != state.target) {
+                state.windows.remove(index);
             }
             state.windows.push_back((id, pid));
             Ok(id)

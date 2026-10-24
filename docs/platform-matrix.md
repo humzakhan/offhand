@@ -32,7 +32,7 @@ cross-check is not a parity proof. The shared contract suite has no assertions.
 | Setup | Hotkey → Permissions → Model → Try it | Hotkey → Model → Try it | Model pane honestly unavailable; no download required for tree commands |
 | Tray | Menu bar | Notification area | Pause/Resume and up to three real recent results |
 | Overlay coordinates | AX points converted to physical pixels | Physical UIA screen pixels | Desktop top-left origin, negative coordinates allowed; overlay converts per monitor |
-| Rectangle DPI assumption | CGDisplayMode pixel width / display bounds width | UIA bounds are already desktop physical pixels | Windows does not rescale UIA rectangles; relies on the provider returning physical coordinates; native mixed-DPI verification pending |
+| Rectangle DPI assumption | CGDisplayMode pixel width / display bounds width | UIA bounds are already desktop physical pixels | Windows assumes Per-Monitor-V2 awareness and does not rescale UIA rectangles; the CLI has no explicit DPI context; thread DPI-awareness scoping and native mixed-DPI verification are deferred |
 | Content protection / click-through | Native Tauri protection | Native Tauri protection | Requires native verification; compile does not prove exclusion |
 | Window material | Best-effort vibrancy | Best-effort Mica/Acrylic | Opaque graphite fallback; native appearance unverified |
 | CLI | Native adapter | Native adapter | Same runner; Linux reports unsupported (exit 2) |
