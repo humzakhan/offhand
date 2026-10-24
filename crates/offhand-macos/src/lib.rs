@@ -114,17 +114,33 @@ fn walk(
     cache: &mut Cache,
     remaining: &mut usize,
 ) {
-    if *remaining == 0 || depth >= 32 || native::tree_deadline_expired() { return; }
+    if *remaining == 0 || depth >= 32 || native::tree_deadline_expired() {
+        return;
+    }
     *remaining -= 1;
-    let Ok(pid) = object.pid() else { return; };
-    if own_pid().ok() == Some(pid) { return; }
-    let Ok(element) = describe(object, cache) else { return; };
-    if native::tree_deadline_expired() || output.iter().any(|old| old.id == element.id) { return; }
+    let Ok(pid) = object.pid() else {
+        return;
+    };
+    if own_pid().ok() == Some(pid) {
+        return;
+    }
+    let Ok(element) = describe(object, cache) else {
+        return;
+    };
+    if native::tree_deadline_expired() || output.iter().any(|old| old.id == element.id) {
+        return;
+    }
     output.push(element);
-    if depth + 1 >= 32 || *remaining == 0 { return; }
-    let Ok(children) = object.children(*remaining) else { return; };
+    if depth + 1 >= 32 || *remaining == 0 {
+        return;
+    }
+    let Ok(children) = object.children(*remaining) else {
+        return;
+    };
     for child in children {
-        if *remaining == 0 || native::tree_deadline_expired() { break; }
+        if *remaining == 0 || native::tree_deadline_expired() {
+            break;
+        }
         walk(&child, depth + 1, output, cache, remaining);
     }
 }
@@ -132,7 +148,10 @@ fn validate_text(text: &str) -> Result<()> {
     if text.chars().take(2001).count() > 2000 {
         return Err(Error::Other("text exceeds 2000 characters".into()));
     }
-    if text.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\t')) {
+    if text
+        .chars()
+        .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
+    {
         return Err(Error::Other("unsupported text control character".into()));
     }
     Ok(())
@@ -188,19 +207,21 @@ impl Platform for MacPlatform {
     fn tree(&self, window: Option<WindowId>) -> Result<Vec<Element>> {
         native::require_trust()?;
         let id = target(window)?;
-        native::with_tree_deadline(|| CACHE.with_borrow_mut(|cache| {
-            let (_, window) = cache.window(id)?;
-            let mut nodes = Vec::new();
-            walk(&window, 0, &mut nodes, cache, &mut 2000);
-            // Preserve identities for live nodes, release references absent from the fresh snapshot.
-            let live: HashSet<_> = nodes.iter().map(|node| node.id.clone()).collect();
-            cache.elements.retain(|_, bucket| {
-                bucket.retain(|(id, _)| live.contains(id));
-                !bucket.is_empty()
-            });
-            cache.element_count = cache.elements.values().map(Vec::len).sum();
-            Ok(nodes)
-        }))
+        native::with_tree_deadline(|| {
+            CACHE.with_borrow_mut(|cache| {
+                let (_, window) = cache.window(id)?;
+                let mut nodes = Vec::new();
+                walk(&window, 0, &mut nodes, cache, &mut 2000);
+                // Preserve identities for live nodes, release references absent from the fresh snapshot.
+                let live: HashSet<_> = nodes.iter().map(|node| node.id.clone()).collect();
+                cache.elements.retain(|_, bucket| {
+                    bucket.retain(|(id, _)| live.contains(id));
+                    !bucket.is_empty()
+                });
+                cache.element_count = cache.elements.values().map(Vec::len).sum();
+                Ok(nodes)
+            })
+        })
     }
     fn capture(&self, _region: Option<Rect>) -> Result<Frame> {
         Err(Error::Unimplemented)
@@ -277,9 +298,15 @@ impl Platform for MacPlatform {
                 return Ok(*id);
             }
             // A closed AX window can retain a valid app PID, so probe the window itself.
-            cache.windows.retain(|(_, app, window)| app.pid().is_ok() && window.attr("AXRole").is_ok());
+            cache
+                .windows
+                .retain(|(_, app, window)| app.pid().is_ok() && window.attr("AXRole").is_ok());
             if cache.windows.len() >= 128
-                && let Some(index) = cache.windows.iter().position(|(id, _, _)| Some(*id) != cache.target) {
+                && let Some(index) = cache
+                    .windows
+                    .iter()
+                    .position(|(id, _, _)| Some(*id) != cache.target)
+            {
                 // Removing the tuple releases both retained CF references.
                 cache.windows.remove(index);
             }

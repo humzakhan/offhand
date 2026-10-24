@@ -178,7 +178,9 @@ impl Object {
         let count = unsafe { CFArrayGetCount(array.0) }.max(0) as usize;
         let mut result = Vec::new();
         for index in 0..count.min(limit) {
-            if tree_deadline_expired() { break; }
+            if tree_deadline_expired() {
+                break;
+            }
             let index = isize::try_from(index).map_err(|e| Error::Other(e.to_string()))?;
             // SAFETY: index is in bounds; array retains its borrowed child during retain.
             let child = unsafe { CFArrayGetValueAtIndex(array.0, index) };
@@ -364,17 +366,26 @@ pub(super) fn keyboard(key: u16, flags: u64, text: Option<&[u16]>) -> Result<()>
 thread_local! { static TREE_DEADLINE: Cell<Option<Instant>> = const { Cell::new(None) }; }
 struct TreeDeadline(Option<Instant>);
 impl Drop for TreeDeadline {
-    fn drop(&mut self) { TREE_DEADLINE.set(self.0); }
+    fn drop(&mut self) {
+        TREE_DEADLINE.set(self.0);
+    }
 }
 pub(super) fn with_tree_deadline<T>(operation: impl FnOnce() -> T) -> T {
-    let _guard = TreeDeadline(TREE_DEADLINE.replace(Some(Instant::now() + Duration::from_millis(2500))));
+    let _guard =
+        TreeDeadline(TREE_DEADLINE.replace(Some(Instant::now() + Duration::from_millis(2500))));
     operation()
 }
 pub(super) fn tree_deadline_expired() -> bool {
-    TREE_DEADLINE.get().is_some_and(|deadline| Instant::now() >= deadline)
+    TREE_DEADLINE
+        .get()
+        .is_some_and(|deadline| Instant::now() >= deadline)
 }
 fn check_tree_deadline() -> Result<()> {
-    if tree_deadline_expired() { Err(Error::Other("tree snapshot deadline reached".into())) } else { Ok(()) }
+    if tree_deadline_expired() {
+        Err(Error::Other("tree snapshot deadline reached".into()))
+    } else {
+        Ok(())
+    }
 }
 fn display_pixel_width(display: u32) -> Result<usize> {
     // SAFETY: display is an ID returned by CoreGraphics. The copy result is CF-owned
