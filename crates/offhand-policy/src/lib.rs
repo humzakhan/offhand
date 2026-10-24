@@ -18,25 +18,95 @@ const RISKY_WORDS: [&str; 8] = [
     "send", "delete", "remove", "buy", "pay", "purchase", "checkout", "submit",
 ];
 
-/// Classify an action, given the element it targets if known.
-///
-/// - `Type` into a field labelled "password" needs confirmation.
-/// - `Press` or `Click` on a target whose label contains a risky word needs confirmation.
-/// - Everything else is safe.
+/// Classify every native action. Block never has an approval bypass.
 #[must_use]
 pub fn classify(action: &Action, target: Option<&Element>) -> Risk {
     let label = target
         .and_then(|e| e.label.as_deref())
-        .map(str::to_lowercase);
-    let Some(label) = label else {
-        return Risk::Safe;
-    };
-    let risky = match action {
-        Action::Type(_) => label.contains("password"),
-        Action::Press(_) | Action::Click { .. } => RISKY_WORDS.iter().any(|w| label.contains(w)),
-        Action::Key(_) | Action::Scroll { .. } => false,
-    };
-    if risky { Risk::Confirm } else { Risk::Safe }
+        .unwrap_or_default()
+        .to_lowercase();
+    match action {
+        Action::FocusWindow(_) | Action::Scroll { .. } => Risk::Safe,
+        Action::OpenApp(name) => {
+            let name = name.trim();
+            if name.is_empty()
+                || matches!(name, "." | ".." | "~")
+                || name.starts_with('-')
+                || name.contains(['/', '\\', ':', '%', '"'])
+                || name.chars().any(|c| c.is_control() || matches!(c,
+                    '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}'
+                ))
+            {
+                return Risk::Block;
+            }
+            let name = name.to_lowercase();
+            let name = name
+                .strip_suffix(".app")
+                .or_else(|| name.strip_suffix(".exe"))
+                .unwrap_or(&name);
+            let normalized: String = name
+                .chars()
+                .filter(|c| !matches!(c, ' ' | '-' | '_'))
+                .collect();
+            if [
+                "systemsettings",
+                "systempreferences",
+                "settings",
+                "controlpanel",
+                "control",
+            ]
+            .contains(&normalized.as_str())
+            {
+                Risk::Confirm
+            } else {
+                Risk::Safe
+            }
+        }
+        Action::Type(text) => {
+            if text
+                .chars()
+                .any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
+            {
+                return Risk::Block;
+            }
+            if target.is_none()
+                || target.is_some_and(|e| e.role == offhand_platform::Role::PasswordField)
+                || label.contains("password")
+                || text.contains(['\n', '\r'])
+            {
+                Risk::Confirm
+            } else {
+                Risk::Safe
+            }
+        }
+        Action::Press(_) | Action::Click { .. } => {
+            let normalized = label
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if normalized.contains("empty trash") || normalized.contains("empty recycle bin") {
+                Risk::Block
+            } else if RISKY_WORDS.iter().any(|word| label.contains(word)) {
+                Risk::Confirm
+            } else {
+                Risk::Safe
+            }
+        }
+        Action::Key(key) => {
+            let key = key.to_ascii_lowercase();
+            if key.split('+').any(|part| matches!(part, "escape" | "esc")) {
+                Risk::Block
+            } else if matches!(
+                key.as_str(),
+                "tab" | "left" | "right" | "up" | "down" | "home" | "end" | "pageup" | "pagedown"
+            ) {
+                Risk::Safe
+            } else {
+                Risk::Confirm
+            }
+        }
+    }
 }
 
 #[cfg(test)]
