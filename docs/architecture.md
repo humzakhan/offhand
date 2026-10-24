@@ -39,9 +39,10 @@ Mutating invokes acknowledge actor acceptance, not semantic task completion.
    Direct CLI `submit` captures it automatically. `open` works without a window.
 2. `submit` replaces all prior work and approvals. Resolve the command against a
    fresh, bounded snapshot of that captured window. Match labels uniquely first.
-   If unmatched or ambiguous, a local embedder may select the top enabled target
-   at cosine >= 0.45 (provisional until benched). Errors or lower scores remain
-   unmatched. Never guess coordinates.
+   Only with zero deterministic candidates may a local embedder select the top
+   enabled target at cosine >= 0.45 and a top-two gap >= 0.05 (both provisional
+   until benched). Ambiguity, disabled matches, embedding errors and weak or
+   insufficiently distinct scores remain unmatched. Never guess coordinates.
 3. Publish Running with the highlight, AwaitConfirm with a new increasing ID,
    Blocked, or Stuck. No action is dispatched on the resolution tick.
 4. A later tick restores the captured window through a policy-approved
@@ -58,8 +59,8 @@ Mutating invokes acknowledge actor acceptance, not semantic task completion.
 A command `click <label>` means accessibility Press/Invoke, not coordinate input.
 `press` first recognizes the shared key vocabulary, then tries an enabled label.
 Unsupported chords and reserved Escape enter Stuck. Without an embedder,
-ambiguous/missing labels enter Stuck; semantic ranking may resolve those labels
-when an embedder is installed.
+ambiguous/missing labels enter Stuck. With an embedder, semantic ranking can
+resolve only queries with zero deterministic candidates; ambiguity stays Stuck.
 The shell rejects injecting its own configured summon chord. Typing suffixes are
 preserved verbatim; application launch names are trimmed and never placed in state messages or diagnostic Agent output.
 
@@ -99,10 +100,12 @@ bypass integrity levels, foreground restrictions or rejected SendInput calls.
 
 Local embeddings are defined in [ADR-0005](adr/0005-embeddings.md). Agent loads
 the default embedder when available and uses semantic label ranking only when
-deterministic matching cannot resolve a unique target. The provisional minimum
-cosine is 0.45; policy and confirmation still apply. With no backend, on an
-embedding error or below that score, the command stays unmatched. Future T1 can
-reuse the shortlist before `Engine::choose`.
+deterministic matching has zero candidates. Exact and substring ambiguities
+and disabled label matches cannot fall through to semantic ranking. Provisional
+minimum cosine and top-two margin are 0.45 and 0.05. Semantic targets upgrade
+Safe policy results to Confirm, showing the matched label and score; Block stays
+Block. With no backend, on an embedding error or below either threshold, the
+command stays unmatched. Future T1 can reuse the shortlist before `Engine::choose`.
 
 Capture returns Unimplemented on both OSes. NoopEngine returns Unimplemented for
 both Engine methods. This slice adds no llama.cpp dependency; the default

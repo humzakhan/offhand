@@ -69,6 +69,11 @@ pub trait Embedder: std::fmt::Debug + Send + Sync {
     ///
     /// Each vector must have [`Self::dims`] components. Return an error when the
     /// backend is unavailable; callers retain their original candidates on failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Unimplemented`] without a backend, or [`Error::Backend`]
+    /// when local inference fails.
     fn embed_text(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>>;
 
     /// Embed RGBA frames or element crops into the same space as text vectors.
@@ -148,6 +153,11 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
 /// Empty labels or zero `k` return an empty list without invoking the backend.
 /// Backend errors and malformed batches return an error, never a partial ranking.
 /// This only ranks candidates; it does not select or authorize an action.
+///
+/// # Errors
+///
+/// Propagates embedding errors. Returns [`Error::Backend`] for a zero dimension,
+/// wrong vector count or dimensions, or non-finite components.
 pub fn shortlist(
     embedder: &dyn Embedder,
     query: &str,
@@ -165,6 +175,11 @@ pub fn shortlist(
 /// Returns at most `k` pairs in descending score order, with input order breaking
 /// ties. Scores let callers reject weak semantic matches without embedding twice.
 /// Backend errors and malformed batches return an error, never a partial ranking.
+///
+/// # Errors
+///
+/// Propagates embedding errors. Returns [`Error::Backend`] for a zero dimension,
+/// wrong vector count or dimensions, or non-finite components.
 pub fn shortlist_with_scores(
     embedder: &dyn Embedder,
     query: &str,

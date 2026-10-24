@@ -52,21 +52,30 @@ existing RGBA `Frame` values and defaults to Unimplemented. Text and image
 vectors from the same backend can be compared with cosine. Retrieval text uses
 `task: search result | query: ` and `title: none | text: `; images have no prefix.
 
-Per D19/D20, embeddings are used by default whenever the model is installed
-and a backend is available. `Agent::new` calls `default_embedder()`;
+Per D19/D20, embeddings are used whenever the model is installed (v0.1 path;
+backend lands via `embed-llama`). `Agent::new` calls `default_embedder()`;
 `with_embedder` overrides that choice. This slice's small factory returns None
 until slice F supplies the feature-gated runtime; it adds no native dependency.
 
 `Agent::resolve` invokes `match_label` for click and label-based press commands,
 including pre-dispatch revalidation. D21 makes the original deterministic matcher
-run first: any unique valid match wins without an embedding call. For unmatched
-or ambiguous queries, an embedder ranks enabled, nonempty labels and selects the
-top candidate only at cosine >= `MIN_EMBED_SCORE` (0.45), preserving native
-element identity. This threshold is provisional until benched on both OSes.
-Equal scores retain tree order. No embedder, embedding failure or a score below
-the threshold leaves the command unmatched / Stuck. Ranking never executes
-actions or bypasses `offhand_policy::classify`,
-confirmation or target revalidation. VLM selection and capture remain disabled.
+run first: any unique valid match wins without an embedding call. Review R-E
+restricts semantic fallback to queries with zero deterministic candidates of
+any kind. Any case-sensitive or insensitive exact match, including disabled
+or duplicate matches, and ambiguous substring matches preserve Stuck behavior.
+Only then may an embedder rank enabled, nonempty labels and select the top
+candidate at cosine >= `MIN_EMBED_SCORE` (0.45), with a top1 minus top2 gap >=
+`MIN_EMBED_MARGIN` (0.05) when a runner-up exists. Both thresholds are provisional
+until benched on both OSes. Equal scores retain tree order but fail the margin.
+No embedder, embedding failure or failure of either threshold leaves the command
+unmatched / Stuck. Native element identity is preserved.
+
+Semantic targets always require confirmation: core calls the unchanged policy
+classifier, upgrading Safe to Confirm while leaving Confirm and Block intact.
+The confirmation detail includes the matched label and cosine score. Semantic
+provenance and score are revalidated before dispatch; a change revokes approval.
+Ranking never executes actions or bypasses policy or target revalidation.
+VLM selection and capture remain disabled.
 
 ## Acceptance condition
 
