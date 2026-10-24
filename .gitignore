@@ -1,0 +1,11 @@
+target/
+node_modules/
+app/dist/
+*.gguf
+*.safetensors
+models/cache/
+bench/.venv/
+.DS_Store
+Thumbs.db
+.env
+.env.*
