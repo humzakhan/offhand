@@ -15,11 +15,12 @@ id = "embeddinggemma-2"
 role = "used whenever the model is installed (v0.1 path; backend lands via embed-llama)"
 # https://huggingface.co/unsloth/embeddinggemma-2-GGUF
 repo = "unsloth/embeddinggemma-2-GGUF"
+revision = "031f0d4b35536f69ab3509d4893c923264fcf253"
 # About 310 MB; text tower only. Requires llama.cpp >= 4fbc76d (PR #30054).
 # Vision through mtmd remains unverified.
 file = "embeddinggemma-2-Q8_0.gguf"
-# Verify the selected artifact and pin its SHA-256 before enabling downloads.
-sha256 = "TBD"
+# Hugging Face tree API, at the revision above: this file's lfs.oid (SHA-256).
+sha256 = "6f1bd4ac6c5df7444f9cca7ca36cafe6cfa34cd6f49fefb1e0b4be8143aed8bc"
 license = "Apache-2.0"
 
 [[model]]
