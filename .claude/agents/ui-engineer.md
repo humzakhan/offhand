@@ -38,7 +38,7 @@ Build the app: a command bar, a click-through overlay, and a settings window. Th
 ## Done criteria
 
 ```sh
-npm --prefix app run build
+pnpm --dir app run build
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
