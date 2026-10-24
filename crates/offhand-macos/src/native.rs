@@ -1,19 +1,31 @@
 //! Small ownership-checked wrappers around the C Accessibility/CoreGraphics APIs.
 #![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 
-use std::{ffi::{c_char, c_void, CString}, ptr};
 use offhand_platform::{Error, Rect, Result};
+use std::{
+    ffi::{CString, c_char, c_void},
+    ptr,
+};
 
 type Ref = *const c_void;
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct Point { x: f64, y: f64 }
+struct Point {
+    x: f64,
+    y: f64,
+}
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct Size { w: f64, h: f64 }
+struct Size {
+    w: f64,
+    h: f64,
+}
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct CRect { origin: Point, size: Size }
+struct CRect {
+    origin: Point,
+    size: Size,
+}
 
 #[link(name = "CoreFoundation", kind = "framework")]
 unsafe extern "C" {
@@ -38,7 +50,13 @@ unsafe extern "C" {
     fn AXIsProcessTrusted() -> bool;
     fn AXUIElementCreateSystemWide() -> Ref;
     fn AXUIElementCopyAttributeValue(element: Ref, attr: Ref, value: *mut Ref) -> i32;
-    fn AXUIElementCopyAttributeValues(element: Ref, attr: Ref, index: isize, max: isize, value: *mut Ref) -> i32;
+    fn AXUIElementCopyAttributeValues(
+        element: Ref,
+        attr: Ref,
+        index: isize,
+        max: isize,
+        value: *mut Ref,
+    ) -> i32;
     fn AXUIElementSetAttributeValue(element: Ref, attr: Ref, value: Ref) -> i32;
     fn AXUIElementPerformAction(element: Ref, action: Ref) -> i32;
     fn AXUIElementSetMessagingTimeout(element: Ref, seconds: f32) -> i32;
@@ -75,7 +93,11 @@ impl Drop for Object {
 }
 impl Object {
     fn owned(value: Ref) -> Result<Self> {
-        if value.is_null() { Err(Error::Other("native object unavailable".into())) } else { Ok(Self(value)) }
+        if value.is_null() {
+            Err(Error::Other("native object unavailable".into()))
+        } else {
+            Ok(Self(value))
+        }
     }
     fn string(text: &str) -> Result<Self> {
         let text = CString::new(text).map_err(|_| Error::Other("invalid native string".into()))?;
@@ -103,7 +125,9 @@ impl Object {
         let value = self.attr(name)?;
         // SAFETY: CF type checks accept any live CF object.
         if unsafe { CFGetTypeID(value.0) != AXUIElementGetTypeID() } {
-            return Err(Error::Other("accessibility attribute is not an element".into()));
+            return Err(Error::Other(
+                "accessibility attribute is not an element".into(),
+            ));
         }
         value.timeout();
         Ok(value)
@@ -112,12 +136,18 @@ impl Object {
         let name = Self::string("AXChildren")?;
         let mut raw = ptr::null();
         // SAFETY: valid AX receiver, CFString key and out pointer; limit is at most 2000.
-        let result = unsafe { AXUIElementCopyAttributeValues(self.0, name.0, 0, limit as isize, &raw mut raw) };
-        if result == -25205 || result == -25212 { return Ok(Vec::new()); }
+        let result = unsafe {
+            AXUIElementCopyAttributeValues(self.0, name.0, 0, limit as isize, &raw mut raw)
+        };
+        if result == -25205 || result == -25212 {
+            return Ok(Vec::new());
+        }
         status(result)?;
         let array = Self::owned(raw)?;
         // SAFETY: array is a live CF object; checked before using CFArray operations.
-        if unsafe { CFGetTypeID(array.0) != CFArrayGetTypeID() } { return Ok(Vec::new()); }
+        if unsafe { CFGetTypeID(array.0) != CFArrayGetTypeID() } {
+            return Ok(Vec::new());
+        }
         // SAFETY: type was checked above.
         let count = unsafe { CFArrayGetCount(array.0) }.max(0) as usize;
         let mut result = Vec::new();
@@ -136,19 +166,29 @@ impl Object {
     }
     pub(super) fn text(&self) -> Option<String> {
         // SAFETY: self is live; string operations follow a successful type check.
-        if unsafe { CFGetTypeID(self.0) != CFStringGetTypeID() } { return None; }
+        if unsafe { CFGetTypeID(self.0) != CFStringGetTypeID() } {
+            return None;
+        }
         // SAFETY: self is a CFString and the encoding is UTF-8.
-        let size = unsafe { CFStringGetMaximumSizeForEncoding(CFStringGetLength(self.0), 0x0800_0100) };
-        if !(0..=1_048_576).contains(&size) { return None; }
+        let size =
+            unsafe { CFStringGetMaximumSizeForEncoding(CFStringGetLength(self.0), 0x0800_0100) };
+        if !(0..=1_048_576).contains(&size) {
+            return None;
+        }
         let mut bytes = vec![0_u8; size as usize + 1];
         // SAFETY: writable buffer is size+1 bytes, matching the supplied capacity.
-        if unsafe { CFStringGetCString(self.0, bytes.as_mut_ptr().cast(), size + 1, 0x0800_0100) } == 0 { return None; }
+        if unsafe { CFStringGetCString(self.0, bytes.as_mut_ptr().cast(), size + 1, 0x0800_0100) }
+            == 0
+        {
+            return None;
+        }
         let end = bytes.iter().position(|&b| b == 0)?;
         String::from_utf8(bytes[..end].to_vec()).ok()
     }
     pub(super) fn boolean(&self) -> Option<bool> {
         // SAFETY: boolean access follows a successful CFBoolean type check.
-        (unsafe { CFGetTypeID(self.0) == CFBooleanGetTypeID() }).then(|| unsafe { CFBooleanGetValue(self.0) != 0 })
+        (unsafe { CFGetTypeID(self.0) == CFBooleanGetTypeID() })
+            .then(|| unsafe { CFBooleanGetValue(self.0) != 0 })
     }
     pub(super) fn pid(&self) -> Result<i32> {
         let mut pid = 0;
@@ -183,29 +223,48 @@ impl Object {
         let position = self.attr("AXPosition")?;
         let size = self.attr("AXSize")?;
         // SAFETY: live CF objects; verify AXValue types before extracting.
-        if unsafe { CFGetTypeID(position.0) != AXValueGetTypeID() || CFGetTypeID(size.0) != AXValueGetTypeID() } {
+        if unsafe {
+            CFGetTypeID(position.0) != AXValueGetTypeID()
+                || CFGetTypeID(size.0) != AXValueGetTypeID()
+        } {
             return Err(Error::Other("invalid accessibility geometry".into()));
         }
         let mut p = Point::default();
         let mut s = Size::default();
         // SAFETY: output types match kAXValueCGPointType (1) and CGSizeType (2).
-        if !unsafe { AXValueGetValue(position.0, 1, (&raw mut p).cast()) && AXValueGetValue(size.0, 2, (&raw mut s).cast()) } {
+        if !unsafe {
+            AXValueGetValue(position.0, 1, (&raw mut p).cast())
+                && AXValueGetValue(size.0, 2, (&raw mut s).cast())
+        } {
             return Err(Error::Other("missing accessibility geometry".into()));
         }
         let mut display = 0;
         let mut count = 0;
         // SAFETY: one display slot and count storage are valid writable outputs.
         let rc = unsafe { CGGetDisplaysWithPoint(p, 1, &raw mut display, &raw mut count) };
-        if rc != 0 || count == 0 { return Err(Error::Other("element display unavailable".into())); }
+        if rc != 0 || count == 0 {
+            return Err(Error::Other("element display unavailable".into()));
+        }
         // SAFETY: display ID was returned by CoreGraphics.
         let (frame, pixels) = unsafe { (CGDisplayBounds(display), CGDisplayPixelsWide(display)) };
         let scale = pixels as f64 / frame.size.w;
-        Ok(Rect { x: p.x * scale, y: p.y * scale, w: s.w * scale, h: s.h * scale })
+        Ok(Rect {
+            x: p.x * scale,
+            y: p.y * scale,
+            w: s.w * scale,
+            h: s.h * scale,
+        })
     }
 }
 
 fn status(code: i32) -> Result<()> {
-    if code == 0 { Ok(()) } else if code == -25211 { Err(Error::PermissionDenied("Accessibility".into())) } else { Err(Error::Other(format!("Accessibility error {code}"))) }
+    if code == 0 {
+        Ok(())
+    } else if code == -25211 {
+        Err(Error::PermissionDenied("Accessibility".into()))
+    } else {
+        Err(Error::Other(format!("Accessibility error {code}")))
+    }
 }
 pub(super) fn trusted() -> bool {
     // SAFETY: no arguments or preconditions; does not prompt.
@@ -220,7 +279,11 @@ pub(super) fn request_recording() {
     unsafe { CGRequestScreenCaptureAccess() };
 }
 pub(super) fn require_trust() -> Result<()> {
-    if trusted() { Ok(()) } else { Err(Error::PermissionDenied("Accessibility".into())) }
+    if trusted() {
+        Ok(())
+    } else {
+        Err(Error::PermissionDenied("Accessibility".into()))
+    }
 }
 pub(super) fn keyboard(key: u16, flags: u64, text: Option<&[u16]>) -> Result<()> {
     for down in [true, false] {
