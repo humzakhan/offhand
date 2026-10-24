@@ -59,8 +59,8 @@ Mutating invokes acknowledge actor acceptance, not semantic task completion.
 A command `click <label>` means accessibility Press/Invoke, not coordinate input.
 `press` first recognizes the shared key vocabulary, then tries an enabled label.
 Unsupported chords and reserved Escape enter Stuck. Without an embedder,
-ambiguous/missing labels enter Stuck; semantic ranking may resolve those labels
-when an embedder is installed.
+ambiguous/missing labels enter Stuck. With an embedder, semantic ranking can
+resolve only queries with zero deterministic candidates; ambiguity stays Stuck.
 The shell rejects injecting its own configured summon chord. Typing suffixes are
 preserved verbatim; application launch names are trimmed and never placed in state messages or diagnostic Agent output.
 
