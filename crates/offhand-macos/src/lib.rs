@@ -58,12 +58,8 @@ impl Cache {
 }
 
 fn describe(object: &Object, cache: &mut Cache) -> Result<Element> {
-    let native_role = object
-        .attr("AXRole")
-        .ok()
-        .and_then(|v| v.text())
-        .unwrap_or_default();
-    let subrole = object.attr("AXSubrole").ok().and_then(|v| v.text());
+    let native_role = object.attr("AXRole")?.text().ok_or_else(|| Error::Other("accessibility role unavailable".into()))?;
+    let subrole = object.optional_attr("AXSubrole")?.and_then(|v| v.text());
     let role =
         if subrole.as_deref() == Some("AXSecureTextField") || native_role == "AXSecureTextField" {
             Role::PasswordField
@@ -118,7 +114,7 @@ fn walk(object: &Object, depth: usize, output: &mut Vec<Element>, cache: &mut Ca
         return Ok(());
     }
     output.push(element);
-    if depth + 1 < 32 {
+    if depth + 1 < 32 && *remaining > 0 {
         for child in object.children(*remaining)? {
             if *remaining == 0 {
                 break;

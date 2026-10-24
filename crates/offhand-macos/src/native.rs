@@ -106,7 +106,7 @@ impl Object {
     pub(super) fn system() -> Result<Self> {
         // SAFETY: no arguments; returns a newly owned AX reference.
         let ax = unsafe { AXUIElement::new_system_wide() };
-        let raw = (&*ax as *const AXUIElement).cast();
+        let raw = (&raw const *ax).cast();
         // Transfer the create reference into our type-erased CF owner.
         std::mem::forget(ax);
         let object = Self::owned(raw)?;
@@ -128,11 +128,16 @@ impl Object {
         }
     }
     pub(super) fn attr(&self, name: &str) -> Result<Self> {
+        self.optional_attr(name)?.ok_or_else(|| Error::Other(format!("accessibility attribute unavailable: {name}")))
+    }
+    pub(super) fn optional_attr(&self, name: &str) -> Result<Option<Self>> {
         let name = Self::string(name)?;
         let mut value = ptr::null();
         // SAFETY: self/name are live references; value is writable out storage.
-        status(unsafe { self.ax()?.copy_attribute_value(&*name.0.cast(), NonNull::from(&mut value).cast()) }.0)?;
-        Self::owned(value)
+        let code = unsafe { self.ax()?.copy_attribute_value(&*name.0.cast(), NonNull::from(&mut value).cast()) }.0;
+        if code == -25205 || code == -25212 { return Ok(None); }
+        status(code)?;
+        Self::owned(value).map(Some)
     }
     pub(super) fn ax_attr(&self, name: &str) -> Result<Self> {
         let value = self.attr(name)?;

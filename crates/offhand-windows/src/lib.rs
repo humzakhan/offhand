@@ -277,7 +277,7 @@ fn walk(
         return Ok(());
     }
     output.push(element);
-    if depth + 1 >= 32 {
+    if depth + 1 >= 32 || *remaining == 0 {
         return Ok(());
     }
     // SAFETY: live walker and element on the same initialized apartment thread.
