@@ -29,8 +29,17 @@ doctest = false
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 offhand-core = { path = "../../crates/offhand-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+tauri-plugin-global-shortcut = "2"
+offhand-platform = { path = "../../crates/offhand-platform" }
+offhand-infer = { path = "../../crates/offhand-infer" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+offhand-macos = { path = "../../crates/offhand-macos" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+offhand-windows = { path = "../../crates/offhand-windows" }
