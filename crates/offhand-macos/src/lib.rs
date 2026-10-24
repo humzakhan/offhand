@@ -8,7 +8,11 @@ use offhand_platform::{
     Action, Element, ElementId, Error, Frame, Permission, Permissions, Platform, Rect, Result,
     Role, WindowId,
 };
-use std::{cell::RefCell, collections::{HashMap, HashSet}, process::Command};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    process::Command,
+};
 
 /// macOS implementation of [`Platform`] (Accessibility API + `CoreGraphics`).
 #[derive(Debug, Default)]
@@ -58,7 +62,10 @@ impl Cache {
 }
 
 fn describe(object: &Object, cache: &mut Cache) -> Result<Element> {
-    let native_role = object.attr("AXRole")?.text().ok_or_else(|| Error::Other("accessibility role unavailable".into()))?;
+    let native_role = object
+        .attr("AXRole")?
+        .text()
+        .ok_or_else(|| Error::Other("accessibility role unavailable".into()))?;
     let subrole = object.optional_attr("AXSubrole")?.and_then(|v| v.text());
     let role =
         if subrole.as_deref() == Some("AXSecureTextField") || native_role == "AXSecureTextField" {
@@ -100,7 +107,13 @@ fn describe(object: &Object, cache: &mut Cache) -> Result<Element> {
     })
 }
 
-fn walk(object: &Object, depth: usize, output: &mut Vec<Element>, cache: &mut Cache, remaining: &mut usize) -> Result<()> {
+fn walk(
+    object: &Object,
+    depth: usize,
+    output: &mut Vec<Element>,
+    cache: &mut Cache,
+    remaining: &mut usize,
+) -> Result<()> {
     if *remaining == 0 || depth >= 32 {
         return Ok(());
     }
@@ -133,10 +146,19 @@ fn target(window: Option<WindowId>) -> Result<WindowId> {
 fn verify_input_target() -> Result<()> {
     native::require_trust()?;
     CACHE.with_borrow(|cache| {
-        let target = cache.target.ok_or_else(|| Error::Other("no restored target window".into()))?;
-        let (_, app, window) = cache.windows.iter().find(|(id, _, _)| *id == target).ok_or(Error::WindowNotFound(target))?;
+        let target = cache
+            .target
+            .ok_or_else(|| Error::Other("no restored target window".into()))?;
+        let (_, app, window) = cache
+            .windows
+            .iter()
+            .find(|(id, _, _)| *id == target)
+            .ok_or(Error::WindowNotFound(target))?;
         let front = Object::system()?.ax_attr("AXFocusedApplication")?;
-        if front.pid()? != app.pid()? || front.pid()? == own_pid()? || !front.ax_attr("AXFocusedWindow")?.same(window) {
+        if front.pid()? != app.pid()?
+            || front.pid()? == own_pid()?
+            || !front.ax_attr("AXFocusedWindow")?.same(window)
+        {
             return Err(Error::Other("target window lost foreground".into()));
         }
         Ok(())

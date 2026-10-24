@@ -1,12 +1,12 @@
 //! Small ownership-checked wrappers around the C Accessibility/CoreGraphics APIs.
 #![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 
-use offhand_platform::{Error, Rect, Result};
-use objc2_application_services::{AXUIElement, AXValue, AXValueType, AXIsProcessTrusted};
 use core_graphics::{
     event::{CGEvent, CGEventFlags, CGEventTapLocation},
     event_source::{CGEventSource, CGEventSourceStateID},
 };
+use objc2_application_services::{AXIsProcessTrusted, AXUIElement, AXValue, AXValueType};
+use offhand_platform::{Error, Rect, Result};
 use std::{
     ffi::{CString, c_char, c_void},
     ptr::{self, NonNull},
@@ -53,13 +53,6 @@ unsafe extern "C" {
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
 
-
-
-
-
-
-
-
     fn AXUIElementGetTypeID() -> usize;
     fn AXValueGetTypeID() -> usize;
 
@@ -68,9 +61,6 @@ unsafe extern "C" {
     fn CGGetDisplaysWithPoint(point: Point, max: u32, displays: *mut u32, count: *mut u32) -> i32;
     fn CGDisplayBounds(display: u32) -> CRect;
     fn CGDisplayPixelsWide(display: u32) -> usize;
-
-
-
 
     static kCFBooleanTrue: Ref;
 }
@@ -128,14 +118,21 @@ impl Object {
         }
     }
     pub(super) fn attr(&self, name: &str) -> Result<Self> {
-        self.optional_attr(name)?.ok_or_else(|| Error::Other(format!("accessibility attribute unavailable: {name}")))
+        self.optional_attr(name)?
+            .ok_or_else(|| Error::Other(format!("accessibility attribute unavailable: {name}")))
     }
     pub(super) fn optional_attr(&self, name: &str) -> Result<Option<Self>> {
         let name = Self::string(name)?;
         let mut value = ptr::null();
         // SAFETY: self/name are live references; value is writable out storage.
-        let code = unsafe { self.ax()?.copy_attribute_value(&*name.0.cast(), NonNull::from(&mut value).cast()) }.0;
-        if code == -25205 || code == -25212 { return Ok(None); }
+        let code = unsafe {
+            self.ax()?
+                .copy_attribute_value(&*name.0.cast(), NonNull::from(&mut value).cast())
+        }
+        .0;
+        if code == -25205 || code == -25212 {
+            return Ok(None);
+        }
         status(code)?;
         Self::owned(value).map(Some)
     }
@@ -157,7 +154,14 @@ impl Object {
         let mut raw = ptr::null();
         // SAFETY: valid AX receiver, CFString key and out pointer; limit is at most 2000.
         let result = unsafe {
-            self.ax()?.copy_attribute_values(&*name.0.cast(), 0, native_limit, NonNull::from(&mut raw).cast()).0
+            self.ax()?
+                .copy_attribute_values(
+                    &*name.0.cast(),
+                    0,
+                    native_limit,
+                    NonNull::from(&mut raw).cast(),
+                )
+                .0
         };
         if result == -25205 || result == -25212 {
             return Ok(Vec::new());
@@ -208,7 +212,9 @@ impl Object {
     }
     pub(super) fn boolean(&self) -> Option<bool> {
         // SAFETY: type checks accept every live CF object.
-        if unsafe { CFGetTypeID(self.0) != CFBooleanGetTypeID() } { return None; }
+        if unsafe { CFGetTypeID(self.0) != CFBooleanGetTypeID() } {
+            return None;
+        }
         // SAFETY: the type check above established CFBoolean; self retains its lifetime.
         Some(unsafe { CFBooleanGetValue(self.0) != 0 })
     }
@@ -234,12 +240,24 @@ impl Object {
     pub(super) fn set(&self, name: &str, value: &Self) -> Result<()> {
         let name = Self::string(name)?;
         // SAFETY: live AX receiver, string key and CF value for duration of call.
-        status(unsafe { self.ax()?.set_attribute_value(&*name.0.cast(), &*value.0.cast()) }.0)
+        status(
+            unsafe {
+                self.ax()?
+                    .set_attribute_value(&*name.0.cast(), &*value.0.cast())
+            }
+            .0,
+        )
     }
     pub(super) fn set_true(&self, name: &str) -> Result<()> {
         let name = Self::string(name)?;
         // SAFETY: live AX receiver/string key; kCFBooleanTrue is an immortal CFBoolean.
-        status(unsafe { self.ax()?.set_attribute_value(&*name.0.cast(), &*kCFBooleanTrue.cast()) }.0)
+        status(
+            unsafe {
+                self.ax()?
+                    .set_attribute_value(&*name.0.cast(), &*kCFBooleanTrue.cast())
+            }
+            .0,
+        )
     }
     pub(super) fn bounds(&self) -> Result<Rect> {
         let position = self.attr("AXPosition")?;
@@ -255,8 +273,10 @@ impl Object {
         let mut s = Size::default();
         // SAFETY: output types match kAXValueCGPointType (1) and CGSizeType (2).
         if !unsafe {
-            (&*position.0.cast::<AXValue>()).value(AXValueType::CGPoint, NonNull::from(&mut p).cast())
-                && (&*size.0.cast::<AXValue>()).value(AXValueType::CGSize, NonNull::from(&mut s).cast())
+            (&*position.0.cast::<AXValue>())
+                .value(AXValueType::CGPoint, NonNull::from(&mut p).cast())
+                && (&*size.0.cast::<AXValue>())
+                    .value(AXValueType::CGSize, NonNull::from(&mut s).cast())
         } {
             return Err(Error::Other("missing accessibility geometry".into()));
         }

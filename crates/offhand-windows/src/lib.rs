@@ -20,7 +20,10 @@ use std::{
 use windows::{
     Win32::{
         Foundation::{CloseHandle, HANDLE, HWND},
-        Security::{GetTokenInformation, GetSidSubAuthorityCount, GetSidSubAuthority, TOKEN_QUERY, TOKEN_MANDATORY_LABEL, TokenIntegrityLevel},
+        Security::{
+            GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation,
+            TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenIntegrityLevel,
+        },
         System::{
             Com::{
                 CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
@@ -30,7 +33,10 @@ use windows::{
                 SafeArrayAccessData, SafeArrayDestroy, SafeArrayGetLBound, SafeArrayGetUBound,
                 SafeArrayUnaccessData,
             },
-            Threading::{GetCurrentProcess, GetCurrentProcessId, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION},
+            Threading::{
+                GetCurrentProcess, GetCurrentProcessId, OpenProcess, OpenProcessToken,
+                PROCESS_QUERY_LIMITED_INFORMATION,
+            },
         },
         UI::{
             Accessibility::{
@@ -327,7 +333,9 @@ fn verify_input_target() -> Result<()> {
         // SAFETY: GetCurrentProcess returns a valid pseudo-handle, which must not be closed.
         let current = unsafe { GetCurrentProcess() };
         if target_integrity > integrity_level(current)? {
-            return Err(Error::PermissionDenied("target has higher Windows integrity; input is blocked".into()));
+            return Err(Error::PermissionDenied(
+                "target has higher Windows integrity; input is blocked".into(),
+            ));
         }
         Ok(())
     })
@@ -346,23 +354,39 @@ fn integrity_level(process: HANDLE) -> Result<u32> {
     let token = OwnedHandle(token);
     let mut required = 0;
     // SAFETY: null information buffer probes the required byte count in writable out storage.
-    let _ = unsafe { GetTokenInformation(token.0, TokenIntegrityLevel, None, 0, &raw mut required) };
+    let _ =
+        unsafe { GetTokenInformation(token.0, TokenIntegrityLevel, None, 0, &raw mut required) };
     if required < size_of::<TOKEN_MANDATORY_LABEL>() as u32 || required > 4096 {
-        return Err(Error::Other("invalid Windows integrity information size".into()));
+        return Err(Error::Other(
+            "invalid Windows integrity information size".into(),
+        ));
     }
     // usize storage provides the native pointer alignment required by TOKEN_MANDATORY_LABEL.
     let mut storage = vec![0_usize; (required as usize).div_ceil(size_of::<usize>())];
     // SAFETY: allocated aligned buffer is at least required bytes and token is live.
-    unsafe { GetTokenInformation(token.0, TokenIntegrityLevel, Some(storage.as_mut_ptr().cast()), required, &raw mut required) }.map_err(native_error)?;
+    unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenIntegrityLevel,
+            Some(storage.as_mut_ptr().cast()),
+            required,
+            &raw mut required,
+        )
+    }
+    .map_err(native_error)?;
     // SAFETY: OS returned a TOKEN_MANDATORY_LABEL in a sufficiently large aligned buffer.
     let label = unsafe { &*storage.as_ptr().cast::<TOKEN_MANDATORY_LABEL>() };
     // SAFETY: TokenIntegrityLevel supplies a valid SID retained within storage.
     let count = unsafe { *GetSidSubAuthorityCount(label.Label.Sid) };
-    if count == 0 { return Err(Error::Other("empty Windows integrity SID".into())); }
+    if count == 0 {
+        return Err(Error::Other("empty Windows integrity SID".into()));
+    }
     // SAFETY: last subauthority index is within the validated SID count and storage is live.
     Ok(unsafe { *GetSidSubAuthority(label.Label.Sid, u32::from(count - 1)) })
 }
-fn optional_element(value: windows::core::Result<IUIAutomationElement>) -> Result<Option<IUIAutomationElement>> {
+fn optional_element(
+    value: windows::core::Result<IUIAutomationElement>,
+) -> Result<Option<IUIAutomationElement>> {
     match value {
         Ok(value) => Ok(Some(value)),
         // A successful native null child/sibling becomes E_POINTER in windows-rs.
@@ -398,7 +422,9 @@ fn send(inputs: &[INPUT]) -> Result<()> {
 fn release_partial_input(inserted: &[INPUT]) {
     let mut held = HashMap::new();
     for event in inserted {
-        if event.r#type != INPUT_KEYBOARD { continue; }
+        if event.r#type != INPUT_KEYBOARD {
+            continue;
+        }
         // SAFETY: the tag above identifies the active KEYBDINPUT member of this INPUT union.
         let keyboard = unsafe { event.Anonymous.ki };
         let key = (keyboard.wVk.0, keyboard.wScan);
@@ -408,7 +434,10 @@ fn release_partial_input(inserted: &[INPUT]) {
             held.insert(key, keyboard.dwFlags);
         }
     }
-    let releases: Vec<_> = held.into_iter().map(|((key, scan), flags)| input(key, scan, flags | KEYEVENTF_KEYUP)).collect();
+    let releases: Vec<_> = held
+        .into_iter()
+        .map(|((key, scan), flags)| input(key, scan, flags | KEYEVENTF_KEYUP))
+        .collect();
     if !releases.is_empty() {
         // SAFETY: initialized keyboard release records and exact ABI size. Only release
         // events are sent; the failed text/key action is never replayed.
@@ -416,8 +445,14 @@ fn release_partial_input(inserted: &[INPUT]) {
     }
 }
 fn modifier_input(key: u16, up: bool) -> INPUT {
-    let mut flags = if key == 0x5b { KEYEVENTF_EXTENDEDKEY } else { KEYBD_EVENT_FLAGS(0) };
-    if up { flags |= KEYEVENTF_KEYUP; }
+    let mut flags = if key == 0x5b {
+        KEYEVENTF_EXTENDEDKEY
+    } else {
+        KEYBD_EVENT_FLAGS(0)
+    };
+    if up {
+        flags |= KEYEVENTF_KEYUP;
+    }
     input(key, 0, flags)
 }
 fn launch(name: &str) -> Result<()> {
@@ -536,12 +571,7 @@ impl Platform for WindowsPlatform {
                 };
                 events.push(input(key, 0, flag));
                 events.push(input(key, 0, flag | KEYEVENTF_KEYUP));
-                events.extend(
-                    modifiers
-                        .iter()
-                        .rev()
-                        .map(|&key| modifier_input(key, true)),
-                );
+                events.extend(modifiers.iter().rev().map(|&key| modifier_input(key, true)));
                 send(&events)
             }
             Action::Click { .. } | Action::Scroll { .. } => Err(Error::Unimplemented),
@@ -567,7 +597,9 @@ impl Platform for WindowsPlatform {
                 return Ok(None);
             }
             // SAFETY: UIA receiver is apartment-local and initialized.
-            let Some(object) = optional_element(unsafe { state.automation()?.GetFocusedElement() })? else {
+            let Some(object) =
+                optional_element(unsafe { state.automation()?.GetFocusedElement() })?
+            else {
                 return Ok(None);
             };
             // SAFETY: retained UIA element; process identity checked before exposing its properties.
