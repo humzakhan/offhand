@@ -5,6 +5,9 @@
 
 use offhand_platform::{Element, Frame};
 
+#[cfg(feature = "embed-llama")]
+pub mod llama_embed;
+
 /// Result alias for inference operations.
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -84,6 +87,16 @@ pub trait Embedder: std::fmt::Debug + Send + Sync {
 /// replace this body behind its feature without changing runner construction.
 #[must_use]
 pub fn default_embedder() -> Option<Box<dyn Embedder>> {
+    #[cfg(feature = "embed-llama")]
+    {
+        let path = llama_embed::model_path()?;
+        if path.is_file() {
+            match llama_embed::LlamaEmbedder::load(&path) {
+                Ok(embedder) => return Some(Box::new(embedder)),
+                Err(error) => eprintln!("Offhand: local embedder unavailable: {error}"),
+            }
+        }
+    }
     None
 }
 
