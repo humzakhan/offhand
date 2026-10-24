@@ -1,0 +1,35 @@
+# Model weights that Offhand can download on first run.
+# Weights are never committed. `cargo xtask fetch-model <id>` reads this file.
+# Fill in sha256 and size after the week-2 benchmark picks the files (ADR-0002).
+
+[[model]]
+id = "qwen3.5-4b"
+role = "default"
+repo = "Qwen/Qwen3.5-4B"
+file = "TBD (GGUF Q4_K_M + mmproj)"
+sha256 = "TBD"
+license = "Apache-2.0"
+
+[[model]]
+id = "ui-venus-1.5-2b"
+role = "small"
+repo = "inclusionAI/UI-Venus-1.5-2B"
+file = "TBD"
+sha256 = "TBD"
+license = "Apache-2.0"
+
+[[model]]
+id = "gua"
+role = "option-scorer (LoRA on Qwen3.5-4B)"
+repo = "LaplAI/gua"
+file = "TBD"
+sha256 = "TBD"
+license = "Apache-2.0"
+
+[[model]]
+id = "holo1.5-7b"
+role = "accuracy-baseline (bench only)"
+repo = "Hcompany/Holo1.5-7B"
+file = "TBD"
+sha256 = "TBD"
+license = "Apache-2.0"
