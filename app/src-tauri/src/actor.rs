@@ -323,7 +323,7 @@ fn run<P: Platform>(
                 }
                 Control::Confirm(id, decision, reply) => {
                     let result = if matches!(agent.state(), UiState::Blocked { .. })
-                        && decision == ConfirmationDecision::Stop
+                        && id == 0 && decision == ConfirmationDecision::Stop
                     {
                         agent.stop();
                         Ok(())

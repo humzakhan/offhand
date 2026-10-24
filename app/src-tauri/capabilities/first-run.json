@@ -6,8 +6,6 @@
     "first-run"
   ],
   "permissions": [
-    "core:event:allow-listen",
-    "core:event:allow-unlisten",
     "allow-offhand-settings",
     "allow-offhand-set-hotkey",
     "allow-offhand-permissions",

@@ -99,7 +99,7 @@ function Preferences({ firstRun }: { firstRun: boolean }) {
   }, [firstRun, current]);
   const request = (p: "accessibility" | "screen_recording") => { void api.requestPermission(p).then(setPermissions).catch(e => setError(errorText(e))); };
   const saveHotkey = async () => { setError(""); setSaving(true); try { setSettings(await api.setHotkey(hotkey)); return true; } catch (e) { setError(errorText(e)); return false; } finally { setSaving(false); } };
-  const hotkeyControl = <><p className="muted">One shortcut, from anywhere. {isMac ? "Option + Space by default." : "Alt + Space replaces the Windows system menu shortcut while Offhand runs."}</p><div className="hotkey-control"><input aria-label="Global shortcut" value={hotkey} onChange={e => setHotkey(e.target.value)} spellCheck={false} /><button className="button" disabled={saving || !settings} onClick={() => { void saveHotkey(); }}>Save shortcut</button></div><small className="muted">Use modifiers and a key, for example Control+Shift+Space. A conflicting shortcut keeps your current binding.</small></>;
+  const hotkeyControl = <><p className="muted">One shortcut, from anywhere. {isMac ? "Option + Space by default." : "Alt + Space replaces the Windows system menu shortcut while Offhand runs."}</p><div className="hotkey-control"><input aria-label="Global shortcut" value={hotkey} onChange={e => setHotkey(e.target.value)} spellCheck={false} /><button className="button" disabled={saving || !settings} onClick={() => { void saveHotkey(); }}>Save shortcut</button></div><small className="muted">Current: <span className="mono">{settings?.hotkey ?? "Checking…"}</span>. Use modifiers and a key, for example Control+Shift+Space. A conflicting shortcut keeps your current binding.</small></>;
   const advance = async () => {
     if (step === 0 && !(await saveHotkey())) return;
     if (step < steps.length - 1) setStep(step + 1);
@@ -117,10 +117,13 @@ function Preferences({ firstRun }: { firstRun: boolean }) {
     {error && <p className="error preferences-error" role="alert">{error}</p>}
   </main>;
 }
-export default function App() {
+function AgentSurface() {
   const event = useAgentState();
   if (surface === "overlay") return <Overlay event={event} />;
   if (surface === "confirm") return <Confirmation ui={event.ui} />;
-  if (surface === "settings" || surface === "first-run") return <Preferences firstRun={surface === "first-run"} />;
   return <Command ui={event.ui} />;
+}
+export default function App() {
+  if (surface === "settings" || surface === "first-run") return <Preferences firstRun={surface === "first-run"} />;
+  return <AgentSurface />;
 }
