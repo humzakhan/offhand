@@ -168,6 +168,7 @@ fn new_hotkey(
         ));
     }
     if Shortcut::from_str(&prefs.hotkey).ok() == Some(key) {
+        if !app.global_shortcut().is_registered(key) { bind(app, hotkey, bridge, || Control::Summon)?; }
         return Ok(prefs.snapshot());
     }
     // Keep the old registration until the replacement is registered and saved.
@@ -179,7 +180,8 @@ fn new_hotkey(
         let _ = unbind(app, hotkey);
         return Err(error);
     }
-    if let Err(error) = unbind(app, &old.hotkey) {
+    if app.global_shortcut().is_registered(old.hotkey.as_str())
+        && let Err(error) = unbind(app, &old.hotkey) {
         *prefs = old;
         let _ = prefs.save(app);
         let _ = unbind(app, hotkey);
@@ -323,7 +325,8 @@ fn run<P: Platform>(
                 }
                 Control::Confirm(id, decision, reply) => {
                     let result = if matches!(agent.state(), UiState::Blocked { .. })
-                        && id == 0 && decision == ConfirmationDecision::Stop
+                        && id == 0
+                        && decision == ConfirmationDecision::Stop
                     {
                         agent.stop();
                         Ok(())
@@ -416,10 +419,19 @@ fn run<P: Platform>(
                     let _ = unbind(app, "Tab");
                     skip = false;
                 }
-                if let UiState::AwaitConfirm { confirmation_id, .. } = &ui {
+                if let UiState::AwaitConfirm {
+                    confirmation_id, ..
+                } = &ui
+                {
                     let id = *confirmation_id;
-                    primary = bind(app, "CommandOrControl+Enter", bridge, move || Control::Decide(id, ConfirmationDecision::Allow)).is_ok();
-                    skip = bind(app, "Tab", bridge, move || Control::Decide(id, ConfirmationDecision::Skip)).is_ok();
+                    primary = bind(app, "CommandOrControl+Enter", bridge, move || {
+                        Control::Decide(id, ConfirmationDecision::Allow)
+                    })
+                    .is_ok();
+                    skip = bind(app, "Tab", bridge, move || {
+                        Control::Decide(id, ConfirmationDecision::Skip)
+                    })
+                    .is_ok();
                 } else if matches!(ui, UiState::Paused | UiState::Stuck { .. }) {
                     primary =
                         bind(app, "CommandOrControl+Enter", bridge, || Control::Resume).is_ok();
@@ -446,7 +458,7 @@ fn run<P: Platform>(
             done_since = None;
         }
         if last_emit.elapsed() >= Duration::from_millis(250) {
-            if !matches!(ui, UiState::Idle) {
+            if app.webview_windows().values().any(|window| window.is_visible().unwrap_or(false)) {
                 desktop::emit(app, revision, &ui);
             }
             if let Some(error) = &shell_error {

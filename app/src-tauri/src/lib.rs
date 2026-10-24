@@ -38,11 +38,9 @@ impl AppError {
 }
 
 /// Start the desktop shell and retain its tray-owned lifetime.
-///
-/// # Panics
-/// Panics if the operating system cannot start Tauri.
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run() {
+pub fn run() -> tauri::Result<()> {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
@@ -66,8 +64,7 @@ pub fn run() {
             actor::start(app.handle().clone(), rx, bridge);
             Ok(())
         })
-        .build(tauri::generate_context!())
-        .expect("error while starting Offhand");
+        .build(tauri::generate_context!())?;
     app.run(|_, event| {
         if let tauri::RunEvent::ExitRequested {
             code: None, api, ..
@@ -76,4 +73,5 @@ pub fn run() {
             api.prevent_exit();
         }
     });
+    Ok(())
 }

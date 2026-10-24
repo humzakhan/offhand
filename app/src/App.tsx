@@ -57,7 +57,7 @@ function Overlay({ event }: { event: StateEvent }) {
     {!['idle', 'listening', 'await_confirm', 'blocked'].includes(ui.state) && <div className={`pill glass ${ui.state}`} key={event.revision} style={{ bottom: geometry.bottom }}>
       {ui.state === "running" && <><span className="spin">◐</span><span>{ui.target?.label ?? "Working"} <span className="muted mono">{ui.step} of {ui.total}</span></span><Badge /><span className="divider" /><span className="muted"><Key>esc</Key> stop</span></>}
       {ui.state === "done" && <><span className="success">✓</span><span>{ui.summary}</span><div className="countdown" /></>}
-      {ui.state === "stuck" && <><span className="muted">?</span><span>Can’t resolve “{ui.query}”</span><span className="muted"><Key>{primary} ↵</Key> retry · <Key>esc</Key> stop</span></>}
+      {ui.state === "stuck" && <><span className="muted">?</span><span className="state-message" title={ui.query}>{ui.query}</span><span className="muted"><Key>{primary} ↵</Key> retry · <Key>esc</Key> stop</span></>}
       {ui.state === "paused" && <><span className="muted">Ⅱ</span><span>Paused</span><span className="muted"><Key>{primary} ↵</Key> resume · <Key>esc</Key> stop</span></>}
     </div>}
   </main>;

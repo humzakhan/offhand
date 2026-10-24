@@ -210,7 +210,10 @@ pub fn tray(
         true,
         None::<&str>,
     )?)?;
-    if matches!(ui, UiState::Running { .. } | UiState::Paused | UiState::Stuck { .. }) {
+    if matches!(
+        ui,
+        UiState::Running { .. } | UiState::Paused | UiState::Stuck { .. }
+    ) {
         let paused = matches!(ui, UiState::Paused | UiState::Stuck { .. });
         menu.append(&MenuItem::with_id(
             app,
