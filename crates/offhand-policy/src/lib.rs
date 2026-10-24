@@ -30,6 +30,7 @@ pub fn classify(action: &Action, target: Option<&Element>) -> Risk {
         Action::OpenApp(name) => {
             let name = name.trim();
             if name.is_empty()
+                || matches!(name, "." | ".." | "~")
                 || name.starts_with('-')
                 || name.contains(['/', '\\', ':'])
                 || name.chars().any(char::is_control)

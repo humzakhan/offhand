@@ -366,6 +366,16 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                         self.present(current)?;
                     }
                     Risk::Safe | Risk::Confirm => {
+                        // A snapshot may have taken time; check the pinned window again
+                        // immediately before dispatch, especially for focused input.
+                        if let Some(window) = current.window
+                            && self.platform.foreground_window()? != window
+                        {
+                            self.stuck(
+                                "The target window changed during revalidation; retry explicitly",
+                            );
+                            return Ok(());
+                        }
                         // This is the sole task dispatch path. Approval is consumed even on failure.
                         self.approved = false;
                         self.pending = None;
