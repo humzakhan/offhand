@@ -94,7 +94,10 @@ pub fn show_error(app: &AppHandle, error: &AppError) {
 }
 
 pub fn replay_error(app: &AppHandle, error: &AppError) {
-    if let (Some(window), Ok(message)) = (app.get_webview_window("command"), serde_json::to_string(&error.message)) {
+    if let (Some(window), Ok(message)) = (
+        app.get_webview_window("command"),
+        serde_json::to_string(&error.message),
+    ) {
         let _ = window.eval(format!(
             "window.__OFFHAND_ERROR__={message};window.dispatchEvent(new CustomEvent('offhand-error',{{detail:{message}}}))"
         ));
@@ -133,7 +136,6 @@ pub fn place(app: &AppHandle, target: Option<&Target>) {
     if let Some(overlay) = app.get_webview_window("overlay") {
         let _ = overlay.set_position(*pos);
         let _ = overlay.set_size(*size);
-
     }
     if let Some(command) = app.get_webview_window("command") {
         let x = f64::from(work.position.x) + (f64::from(work.size.width) - 640.0 * scale) / 2.0;
@@ -208,10 +210,7 @@ pub fn tray(
         true,
         None::<&str>,
     )?)?;
-    if !matches!(
-        ui,
-        UiState::Idle | UiState::Listening | UiState::Done { .. }
-    ) {
+    if matches!(ui, UiState::Running { .. } | UiState::Paused | UiState::Stuck { .. }) {
         let paused = matches!(ui, UiState::Paused | UiState::Stuck { .. });
         menu.append(&MenuItem::with_id(
             app,
@@ -295,7 +294,11 @@ fn sync_geometry(app: &AppHandle) {
         let size = monitor.size();
         let work = monitor.work_area();
         let scale = monitor.scale_factor();
-        let bottom = (f64::from(pos.y) + f64::from(size.height) - f64::from(work.position.y) - f64::from(work.size.height)) / scale + 20.0;
+        let bottom = (f64::from(pos.y) + f64::from(size.height)
+            - f64::from(work.position.y)
+            - f64::from(work.size.height))
+            / scale
+            + 20.0;
         let geometry = serde_json::json!({"x":pos.x,"y":pos.y,"scale":scale,"bottom":bottom});
         let _ = overlay.eval(format!("window.__OFFHAND_MONITOR__={geometry};window.dispatchEvent(new CustomEvent('offhand-monitor',{{detail:window.__OFFHAND_MONITOR__}}))"));
     }

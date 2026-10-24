@@ -25,8 +25,7 @@ pub enum Control {
     Blur,
     Pause,
     Resume,
-    Allow,
-    Skip,
+    Decide(u64, ConfirmationDecision),
     Quit,
     Submit(String, Reply<()>),
     Stop(Option<Reply<()>>),
@@ -125,7 +124,7 @@ fn bind(
     app: &AppHandle,
     key: &str,
     bridge: &Bridge,
-    action: fn() -> Control,
+    action: impl Fn() -> Control + Send + Sync + 'static,
 ) -> Result<(), AppError> {
     let shortcut = Shortcut::from_str(key).map_err(AppError::shortcut)?;
     let tx = bridge.0.clone();
@@ -293,7 +292,9 @@ fn run<P: Platform>(
                             let _ = w.set_focus();
                         }
                     }
-                    if result.is_ok() { shell_error = None; }
+                    if result.is_ok() {
+                        shell_error = None;
+                    }
                     let _ = reply.send(result);
                 }
                 Control::Blur => {
@@ -343,21 +344,10 @@ fn run<P: Platform>(
                         report_error(app, &mut shell_error, AppError::core(error));
                     }
                 }
-                Control::Allow | Control::Skip => {
-                    if let UiState::AwaitConfirm {
-                        confirmation_id, ..
-                    } = agent.state()
-                    {
-                        let id = *confirmation_id;
-                        let decision = if matches!(message, Control::Allow) {
-                            ConfirmationDecision::Allow
-                        } else {
-                            ConfirmationDecision::Skip
-                        };
-                        if let Err(error) = agent.respond(id, decision) {
-                            report_error(app, &mut shell_error, AppError::core(error));
-                        }
-                    }
+                Control::Decide(id, decision) => {
+                    // The binding carries the ID that was visible when it was installed.
+                    // A queued key can never approve a replacement confirmation.
+                    let _ = agent.respond(id, decision);
                 }
                 Control::Settings(reply) => {
                     let _ = reply.send(Ok(prefs.snapshot()));
@@ -395,9 +385,9 @@ fn run<P: Platform>(
             }
         }
         if last_tick.elapsed() >= Duration::from_millis(110) {
-            if let Err(error) = agent.tick() {
-                agent.stop();
-                report_error(app, &mut shell_error, AppError::core(error));
+            if agent.tick().is_err() {
+                // Core enters Stuck and retains the task for an explicit retry.
+                remember(&mut recent, "✕ Native operation failed");
             }
             last_tick = Instant::now();
         }
@@ -426,10 +416,10 @@ fn run<P: Platform>(
                     let _ = unbind(app, "Tab");
                     skip = false;
                 }
-                if matches!(ui, UiState::AwaitConfirm { .. }) {
-                    primary =
-                        bind(app, "CommandOrControl+Enter", bridge, || Control::Allow).is_ok();
-                    skip = bind(app, "Tab", bridge, || Control::Skip).is_ok();
+                if let UiState::AwaitConfirm { confirmation_id, .. } = &ui {
+                    let id = *confirmation_id;
+                    primary = bind(app, "CommandOrControl+Enter", bridge, move || Control::Decide(id, ConfirmationDecision::Allow)).is_ok();
+                    skip = bind(app, "Tab", bridge, move || Control::Decide(id, ConfirmationDecision::Skip)).is_ok();
                 } else if matches!(ui, UiState::Paused | UiState::Stuck { .. }) {
                     primary =
                         bind(app, "CommandOrControl+Enter", bridge, || Control::Resume).is_ok();
@@ -444,7 +434,9 @@ fn run<P: Platform>(
                     remember(&mut recent, &format!("✕ Blocked: {label}"));
                 }
                 desktop::render(app, &ui);
-                if let Some(error) = &shell_error { desktop::show_error(app, error); }
+                if let Some(error) = &shell_error {
+                    desktop::show_error(app, error);
+                }
                 desktop::emit(app, revision, &ui);
                 let _ = desktop::tray(app, &ui, &recent, &prefs.hotkey);
             }
@@ -457,7 +449,9 @@ fn run<P: Platform>(
             if !matches!(ui, UiState::Idle) {
                 desktop::emit(app, revision, &ui);
             }
-            if let Some(error) = &shell_error { desktop::replay_error(app, error); }
+            if let Some(error) = &shell_error {
+                desktop::replay_error(app, error);
+            }
             last_emit = Instant::now();
         }
         if last_tray.elapsed() >= Duration::from_secs(60) {
