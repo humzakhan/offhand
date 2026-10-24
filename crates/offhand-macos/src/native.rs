@@ -280,10 +280,15 @@ impl Object {
         } {
             return Err(Error::Other("missing accessibility geometry".into()));
         }
+        if ![p.x, p.y, s.w, s.h].into_iter().all(f64::is_finite) || s.w < 0.0 || s.h < 0.0 {
+            return Err(Error::Other("invalid accessibility geometry".into()));
+        }
+        // A partially off-screen window can have its top-left corner outside every display.
+        let center = Point { x: p.x + s.w / 2.0, y: p.y + s.h / 2.0 };
         let mut display = 0;
         let mut count = 0;
         // SAFETY: one display slot and count storage are valid writable outputs.
-        let rc = unsafe { CGGetDisplaysWithPoint(p, 1, &raw mut display, &raw mut count) };
+        let rc = unsafe { CGGetDisplaysWithPoint(center, 1, &raw mut display, &raw mut count) };
         if rc != 0 || count == 0 {
             return Err(Error::Other("element display unavailable".into()));
         }
