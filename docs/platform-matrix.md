@@ -25,6 +25,7 @@ cross-check is not a parity proof. The shared contract suite has no assertions.
 | User-input auto-pause | Deferred | Deferred | Tray/manual Pause/Resume only; mouse movement does not pause |
 | Stuck continuation | Explicit retry | Explicit retry | Cmd+Enter / Ctrl+Enter; no automatic continuation after manual input |
 | Point click / scroll commands | Outside T0 grammar | Outside T0 grammar | Shared Action variants remain for future work |
+| Permission prompt | macOS requests the Accessibility prompt on first denial (once per process) | No equivalent grant | Windows has no equivalent grant; the denial error tells the user to enable the host app in System Settings |
 | Native grants | Accessibility required; Screen Recording optional | No equivalent grant | Windows integrity levels and foreground rules can deny input |
 | Summon shortcut | Option+Space | Alt+Space | Configurable; Windows system-menu shortcut is overridden |
 | Allow / Resume | Cmd+Enter | Ctrl+Enter | State-scoped bindings; plain Enter never approves |
