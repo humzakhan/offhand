@@ -34,7 +34,7 @@ pub fn classify(action: &Action, target: Option<&Element>) -> Risk {
     let risky = match action {
         Action::Type(_) => label.contains("password"),
         Action::Press(_) | Action::Click { .. } => RISKY_WORDS.iter().any(|w| label.contains(w)),
-        Action::Key(_) | Action::Scroll { .. } => false,
+        Action::Key(_) | Action::Scroll { .. } | Action::OpenApp(_) | Action::FocusWindow(_) => false,
     };
     if risky { Risk::Confirm } else { Risk::Safe }
 }

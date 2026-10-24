@@ -56,6 +56,8 @@ pub enum Role {
     Button,
     /// An editable text field.
     TextField,
+    /// A secure text field.
+    PasswordField,
     /// A menu entry.
     MenuItem,
     /// A hyperlink.
@@ -84,6 +86,10 @@ pub struct Element {
 /// An input action the agent can perform.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
+    /// Launch an application by name.
+    OpenApp(String),
+    /// Restore a captured external window.
+    FocusWindow(WindowId),
     /// Invoke the default action of an element (accessibility press).
     Press(ElementId),
     /// Click at screen coordinates.
@@ -127,6 +133,16 @@ impl std::fmt::Debug for Frame {
     }
 }
 
+/// A fixed native permission flow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Permission { Accessibility, ScreenRecording }
+/// Native grant status; None means no grant is required.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Permissions {
+    pub accessibility: Option<bool>,
+    pub screen_recording: Option<bool>,
+}
+
 /// The OS surface Offhand needs: read the UI, capture pixels, perform actions.
 pub trait Platform {
     /// Snapshot the accessibility tree, optionally limited to one window.
@@ -135,4 +151,8 @@ pub trait Platform {
     fn capture(&self, region: Option<Rect>) -> Result<Frame>;
     /// Perform an action.
     fn act(&self, action: &Action) -> Result<()>;
+    fn foreground_window(&self) -> Result<WindowId> { Err(Error::Unimplemented) }
+    fn focused_element(&self, _window: Option<WindowId>) -> Result<Option<Element>> { Ok(None) }
+    fn permissions(&self) -> Permissions { Permissions::default() }
+    fn request_permission(&self, _permission: Permission) -> Result<()> { Err(Error::Unimplemented) }
 }

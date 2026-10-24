@@ -35,3 +35,11 @@ pub trait Engine {
     /// Locate the screen point to act on for `task` when the accessibility tree is not enough.
     fn ground(&self, frame: &Frame, task: &str) -> Result<(f64, f64)>;
 }
+
+/// Deliberately unavailable inference backend for tree-only runs.
+#[derive(Debug, Default)]
+pub struct NoopEngine;
+impl Engine for NoopEngine {
+    fn choose(&self, _frame: &Frame, _task: &str, _options: &[Element]) -> Result<Choice> { Err(Error::Unimplemented) }
+    fn ground(&self, _frame: &Frame, _task: &str) -> Result<(f64, f64)> { Err(Error::Unimplemented) }
+}

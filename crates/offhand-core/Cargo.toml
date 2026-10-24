@@ -21,3 +21,5 @@ offhand-policy = { path = "../offhand-policy" }
 offhand-platform = { path = "../offhand-platform" }
 offhand-infer = { path = "../offhand-infer" }
 offhand-cloud = { path = "../offhand-cloud", optional = true }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
