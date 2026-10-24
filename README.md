@@ -124,10 +124,10 @@ the unsupported shell and needs the Tauri WebKit/system prerequisites.
 ```sh
 git clone https://github.com/humzakhan/offhand
 cd offhand
-npm --prefix app ci
-npm --prefix app run build
+pnpm --dir app install --frozen-lockfile
+pnpm --dir app run build
 cargo build -p offhand-app -p offhand-cli
-npm --prefix app run tauri dev
+pnpm --dir app run tauri dev
 ```
 
 ## Repository layout

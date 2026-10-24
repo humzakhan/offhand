@@ -41,8 +41,8 @@ Run these from the repository root.
 | Lint | `cargo clippy --workspace --all-targets -- -D warnings` |
 | Test | `cargo test --workspace` |
 | Licence check | `cargo deny check` |
-| App dev | `npm --prefix app run tauri dev` |
-| App build | `npm --prefix app run build` |
+| App dev | `pnpm --dir app run tauri dev` |
+| App build | `pnpm --dir app run build` |
 | Tasks | `cargo xtask <fetch-model\|bench\|parity-check>` |
 
 Run format, lint, and test before you say a change is done.
