@@ -86,20 +86,30 @@ function Preferences({ firstRun }: { firstRun: boolean }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [permissions, setPermissions] = useState<Permissions | null>(null);
   const [hotkey, setHotkey] = useState("Alt+Space");
+  const hotkeyDirty = useRef(false);
   const [step, setStep] = useState(0);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const steps = isMac ? ["Hotkey", "Permissions", "Model", "Try it"] : ["Hotkey", "Model", "Try it"];
   const current = steps[step];
-  useEffect(() => { void api.settings().then(s => { setSettings(s); setHotkey(s.hotkey); }).catch(e => setError(errorText(e))); }, []);
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      void api.settings().then(s => { setSettings(s); if (!hotkeyDirty.current) setHotkey(s.hotkey); }).catch(e => setError(errorText(e)));
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh); };
+  }, []);
   useEffect(() => {
     if (firstRun && current !== "Permissions") return;
     const poll = () => { if (document.visibilityState === "hidden") return; void api.permissions().then(setPermissions).catch(e => setError(errorText(e))); };
     poll(); const interval = setInterval(poll, 1000); return () => clearInterval(interval);
   }, [firstRun, current]);
   const request = (p: "accessibility" | "screen_recording") => { void api.requestPermission(p).then(setPermissions).catch(e => setError(errorText(e))); };
-  const saveHotkey = async () => { setError(""); setSaving(true); try { setSettings(await api.setHotkey(hotkey)); return true; } catch (e) { setError(errorText(e)); return false; } finally { setSaving(false); } };
-  const hotkeyControl = <><p className="muted">One shortcut, from anywhere. {isMac ? "Option + Space by default." : "Alt + Space replaces the Windows system menu shortcut while Offhand runs."}</p><div className="hotkey-control"><input aria-label="Global shortcut" value={hotkey} onChange={e => setHotkey(e.target.value)} spellCheck={false} /><button className="button" disabled={saving || !settings} onClick={() => { void saveHotkey(); }}>Save shortcut</button></div><small className="muted">Current: <span className="mono">{settings?.hotkey ?? "Checking…"}</span>. Use modifiers and a key, for example Control+Shift+Space. A conflicting shortcut keeps your current binding.</small></>;
+  const saveHotkey = async () => { setError(""); setSaving(true); try { const saved = await api.setHotkey(hotkey); setSettings(saved); setHotkey(saved.hotkey); hotkeyDirty.current = false; return true; } catch (e) { setError(errorText(e)); return false; } finally { setSaving(false); } };
+  const hotkeyControl = <><p className="muted">One shortcut, from anywhere. {isMac ? "Option + Space by default." : "Alt + Space replaces the Windows system menu shortcut while Offhand runs."}</p><div className="hotkey-control"><input aria-label="Global shortcut" value={hotkey} onChange={e => { hotkeyDirty.current = true; setHotkey(e.target.value); }} spellCheck={false} /><button className="button" disabled={saving || !settings} onClick={() => { void saveHotkey(); }}>Save shortcut</button></div><small className="muted">Current: <span className="mono">{settings?.hotkey ?? "Checking…"}</span>. Use modifiers and a key, for example Control+Shift+Space. A conflicting shortcut keeps your current binding.</small></>;
   const advance = async () => {
     if (step === 0 && !(await saveHotkey())) return;
     if (step < steps.length - 1) setStep(step + 1);
