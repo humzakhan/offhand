@@ -114,7 +114,7 @@ impl Command {
             return None;
         }
         match verb.as_str() {
-            "open" => Some(Self::Open(text.to_owned())),
+            "open" => Some(Self::Open(text.trim().to_owned())),
             "click" => Some(Self::Click(text.to_owned())),
             "type" => Some(Self::Type(text.to_owned())),
             "press" => {
@@ -223,7 +223,7 @@ impl Pending {
 #[derive(Clone, Copy)]
 enum Stage {
     Resolve,
-    Ready { focus_attempted: bool },
+    Ready { focus_wait: Option<u8> },
 }
 
 /// Drives a platform on its owning thread; inference is deliberately unused in T0.
@@ -238,6 +238,7 @@ pub struct Agent<P: Platform, E: Engine> {
     stage: Stage,
     confirmation_id: u64,
     approved: bool,
+    revalidation_mismatches: u8,
 }
 
 // Do not expose command text or typed secrets through diagnostic formatting.
@@ -264,6 +265,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
             stage: Stage::Resolve,
             confirmation_id: 0,
             approved: false,
+            revalidation_mismatches: 0,
         }
     }
 
@@ -329,7 +331,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                     self.present(pending)?;
                 }
             }
-            Stage::Ready { focus_attempted } => {
+            Stage::Ready { focus_wait } => {
                 let Some(previous) = self.pending.clone() else {
                     return Ok(());
                 };
@@ -338,8 +340,16 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                 if let Some(window) = previous.window
                     && self.platform.foreground_window().ok() != Some(window)
                 {
-                    if focus_attempted {
-                        self.stuck("The captured window could not be restored");
+                    if let Some(waited) = focus_wait {
+                        if waited >= 4 {
+                            self.stuck(
+                                "The captured window could not be restored after five ticks",
+                            );
+                        } else {
+                            self.stage = Stage::Ready {
+                                focus_wait: Some(waited + 1),
+                            };
+                        }
                         return Ok(());
                     }
                     let action = Action::FocusWindow(window);
@@ -349,7 +359,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                     }
                     self.platform.act(&action)?;
                     self.stage = Stage::Ready {
-                        focus_attempted: true,
+                        focus_wait: Some(0),
                     };
                     return Ok(());
                 }
@@ -357,9 +367,17 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                     return Ok(());
                 };
                 if current != previous {
-                    self.present(current)?;
+                    self.revalidation_mismatches += 1;
+                    if self.revalidation_mismatches >= 3 {
+                        self.stuck(
+                            "The target changed three times during revalidation; retry explicitly",
+                        );
+                    } else {
+                        self.present(current)?;
+                    }
                     return Ok(());
                 }
+                self.revalidation_mismatches = 0;
                 match offhand_policy::classify(&current.action, current.element.as_ref()) {
                     Risk::Block => {
                         self.present(current)?;
@@ -367,36 +385,36 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                     Risk::Confirm if !self.approved => {
                         self.present(current)?;
                     }
-                    Risk::Safe | Risk::Confirm => {
-                        // A snapshot may have taken time; check the pinned window again
-                        // immediately before dispatch, especially for focused input.
-                        if let Some(window) = current.window
-                            && self.platform.foreground_window()? != window
-                        {
-                            self.stuck(
-                                "The target window changed during revalidation; retry explicitly",
-                            );
-                            return Ok(());
-                        }
-                        // This is the sole task dispatch path. Approval is consumed even on failure.
-                        self.approved = false;
-                        self.pending = None;
-                        self.platform.act(&current.action)?;
-                        // Refresh for subsequent resolution, but never retry an uncertain dispatch.
-                        let refreshed = self.platform.tree(current.window);
-                        if refreshed.is_err() {
-                            self.stuck("Action dispatched, but the refreshed tree is unavailable; verify manually");
-                        } else {
-                            self.command = None;
-                            self.emit(UiState::Done {
-                                summary: "Action dispatched; verify the result in the app".into(),
-                                undoable: false,
-                            });
-                        }
-                    }
+                    Risk::Safe | Risk::Confirm => self.dispatch(&current)?,
                 }
             }
         }
+        Ok(())
+    }
+
+    fn dispatch(&mut self, current: &Pending) -> Result<()> {
+        // A snapshot may have taken time; recheck immediately before focused input.
+        if let Some(window) = current.window
+            && self.platform.foreground_window()? != window
+        {
+            self.stuck("The target window changed during revalidation; retry explicitly");
+            return Ok(());
+        }
+        self.approved = false;
+        self.pending = None;
+        self.platform.act(&current.action)?;
+        // Dispatch success is terminal even if verification cannot read a tree.
+        // In particular, Resume must never repeat already-inserted text or a launch.
+        self.clear_task();
+        let summary = if self.platform.tree(current.window).is_ok() {
+            "Action dispatched; verify the result in the app"
+        } else {
+            "Action dispatched; result unverified because the tree is unavailable"
+        };
+        self.emit(UiState::Done {
+            summary: summary.into(),
+            undoable: false,
+        });
         Ok(())
     }
 
@@ -444,15 +462,23 @@ impl<P: Platform, E: Engine> Agent<P, E> {
     fn present(&mut self, pending: Pending) -> Result<()> {
         self.approved = false;
         let target = pending.target();
-        let label = self
-            .command
-            .as_ref()
-            .map_or_else(|| "Action".into(), Command::label);
+        let label = if matches!(pending.action, Action::Press(_) | Action::Click { .. }) {
+            pending
+                .element
+                .as_ref()
+                .and_then(|element| element.label.clone())
+        } else {
+            None
+        }
+        .unwrap_or_else(|| {
+            self.command
+                .as_ref()
+                .map_or_else(|| "Action".into(), Command::label)
+        });
+        let detail = confirmation_detail(&pending);
         let risk = offhand_policy::classify(&pending.action, pending.element.as_ref());
         self.pending = Some(pending);
-        self.stage = Stage::Ready {
-            focus_attempted: false,
-        };
+        self.stage = Stage::Ready { focus_wait: None };
         match risk {
             Risk::Safe => self.running(target),
             Risk::Confirm => {
@@ -463,7 +489,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                     confirmation_id: self.confirmation_id,
                     label,
                     app: "active app".into(),
-                    detail: None,
+                    detail,
                     target,
                 });
             }
@@ -510,11 +536,16 @@ impl<P: Platform, E: Engine> Agent<P, E> {
 
     /// Explicitly retry resolution from Paused or Stuck; never reuse an approval.
     pub fn resume(&mut self) -> Result<()> {
-        if matches!(self.state, UiState::Paused | UiState::Stuck { .. }) && self.command.is_some() {
-            self.pending = None;
-            self.approved = false;
-            self.stage = Stage::Resolve;
-            self.running(None);
+        if matches!(self.state, UiState::Paused | UiState::Stuck { .. }) {
+            if self.command.is_some() {
+                self.pending = None;
+                self.approved = false;
+                self.revalidation_mismatches = 0;
+                self.stage = Stage::Resolve;
+                self.running(None);
+            } else {
+                self.stop();
+            }
         }
         Ok(())
     }
@@ -528,6 +559,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
 
     fn clear_task(&mut self) {
         self.command = None;
+        self.revalidation_mismatches = 0;
         self.pending = None;
         self.approved = false;
         self.stage = Stage::Resolve;
@@ -552,21 +584,64 @@ impl<P: Platform, E: Engine> Agent<P, E> {
     }
 }
 
+fn confirmation_detail(pending: &Pending) -> Option<String> {
+    let detail = match &pending.action {
+        Action::Type(text) => {
+            let password = pending.element.as_ref().is_some_and(|element| {
+                element.role == offhand_platform::Role::PasswordField
+                    || element
+                        .label
+                        .as_ref()
+                        .is_some_and(|label| label.to_lowercase().contains("password"))
+            });
+            if password {
+                Some("Password field")
+            } else if pending.element.is_none() {
+                Some("No focused field")
+            } else if text.contains(['\n', '\r']) {
+                Some("Multiline text")
+            } else {
+                None
+            }
+        }
+        Action::Key(_) => Some("Key shortcut"),
+        Action::OpenApp(_) => Some("System settings"),
+        Action::Press(_)
+        | Action::Click { .. }
+        | Action::FocusWindow(_)
+        | Action::Scroll { .. } => None,
+    };
+    detail.map(str::to_owned)
+}
+
 fn unique_match<'a>(tree: &'a [Element], query: &str) -> Option<&'a Element> {
     if query.is_empty() {
         return None;
     }
-    let exact: Vec<_> = tree
-        .iter()
-        .filter(|e| e.enabled && e.label.as_deref() == Some(query))
-        .collect();
-    if exact.len() == 1 {
-        return exact.first().copied();
-    }
-    if exact.len() > 1 {
-        return None;
-    }
     let lower = query.to_lowercase();
+    // Include disabled matches in the exact tiers: never redirect an exact
+    // disabled target to a different enabled element with a longer label.
+    for case_sensitive in [true, false] {
+        let matches: Vec<_> = tree
+            .iter()
+            .filter(|element| {
+                element.label.as_ref().is_some_and(|label| {
+                    if case_sensitive {
+                        label == query
+                    } else {
+                        label.to_lowercase() == lower
+                    }
+                })
+            })
+            .collect();
+        if !matches.is_empty() {
+            return if matches.len() == 1 && matches[0].enabled {
+                Some(matches[0])
+            } else {
+                None
+            };
+        }
+    }
     let mut matches = tree.iter().filter(|e| {
         e.enabled
             && e.label

@@ -32,8 +32,10 @@ pub fn classify(action: &Action, target: Option<&Element>) -> Risk {
             if name.is_empty()
                 || matches!(name, "." | ".." | "~")
                 || name.starts_with('-')
-                || name.contains(['/', '\\', ':'])
-                || name.chars().any(char::is_control)
+                || name.contains(['/', '\\', ':', '%', '"'])
+                || name.chars().any(|c| c.is_control() || matches!(c,
+                    '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}'
+                ))
             {
                 return Risk::Block;
             }
@@ -61,6 +63,12 @@ pub fn classify(action: &Action, target: Option<&Element>) -> Risk {
             }
         }
         Action::Type(text) => {
+            if text
+                .chars()
+                .any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
+            {
+                return Risk::Block;
+            }
             if target.is_none()
                 || target.is_some_and(|e| e.role == offhand_platform::Role::PasswordField)
                 || label.contains("password")

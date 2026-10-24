@@ -28,7 +28,9 @@ pub enum Error {
     Other(String),
 }
 
-/// Opaque identifier of a UI element, stable within one `tree` snapshot.
+/// Opaque identifier stable across snapshots of the same live native element.
+/// Adapters retain native references for pending actions; IDs must not be reused
+/// for a different element while an action can still reference them.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ElementId(pub String);
 
@@ -153,6 +155,8 @@ pub struct Permissions {
 /// The OS surface Offhand needs: read the UI, capture pixels, perform actions.
 pub trait Platform {
     /// Snapshot the accessibility tree, optionally limited to one window.
+    /// IDs remain stable across snapshots of the same live native element so
+    /// core can compare and revalidate a pending target before dispatch.
     fn tree(&self, window: Option<WindowId>) -> Result<Vec<Element>>;
     /// Capture the screen, optionally limited to a region.
     fn capture(&self, region: Option<Rect>) -> Result<Frame>;

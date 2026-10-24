@@ -32,9 +32,11 @@ press Export
 ```
 
 Leading command whitespace is ignored. Verbs are case-insensitive; the text
-after the verb's first separator is preserved verbatim. `click` invokes an
+after the verb's first separator is preserved verbatim for typing; application
+names are trimmed before launch. `click` invokes an
 enabled accessibility element; it does not guess coordinates. Label matching
-requires a unique exact match first, then a unique case-insensitive substring.
+requires a unique exact match, then a unique case-insensitive exact match,
+then a unique case-insensitive substring. Disabled exact matches stop resolution.
 `press` prefers a supported key/chord and otherwise resolves an enabled label.
 Ambiguous, missing and unsupported targets stop in Stuck for explicit retry.
 
@@ -79,9 +81,10 @@ other text and non-TTY input deny; there is no `--yes`. Ctrl+C requests stop
 before the next action. Exit codes: 0 completed/skipped, 1 stuck/platform failure,
 2 blocked/unsupported OS, 130 stopped. Linux compiles but reports unsupported.
 
-A Done state means the OS accepted the dispatch and a fresh tree was available.
-It does **not** prove a document was saved, a message delivered, or another
-semantic outcome. Verify results in the target app; there is no automatic undo.
+A Done state means the OS accepted the dispatch. If a tree refresh fails, Done
+explicitly reports the result as unverified; Resume never repeats that dispatch.
+Even a successful refresh does **not** prove a document was saved, a message
+delivered, or another semantic outcome. Verify results in the target app; there is no automatic undo.
 
 ## Grants and deliberate limits
 
