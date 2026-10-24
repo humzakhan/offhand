@@ -33,7 +33,9 @@ pub fn run(args: impl IntoIterator<Item = String>) -> Result<()> {
     for argument in args {
         match argument.as_str() {
             "--allow-unverified" => allow_unverified = true,
-            _ if argument.starts_with('-') => return Err(format!("unknown option: {argument}").into()),
+            _ if argument.starts_with('-') => {
+                return Err(format!("unknown option: {argument}").into());
+            }
             _ if id.is_none() => id = Some(argument),
             _ => return Err("usage: cargo xtask fetch-model <id> [--allow-unverified]".into()),
         }
