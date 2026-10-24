@@ -570,7 +570,9 @@ fn application_executable(name: &str) -> Result<String> {
         return Err(Error::Other("invalid application name".into()));
     }
     match Path::new(name).extension() {
-        Some(extension) if extension.as_encoded_bytes().eq_ignore_ascii_case(b"exe") => Ok(name.to_owned()),
+        Some(extension) if extension.as_encoded_bytes().eq_ignore_ascii_case(b"exe") => {
+            Ok(name.to_owned())
+        }
         Some(_) => Err(Error::Other("invalid application extension".into())),
         None if !name.ends_with('.') => Ok(format!("{name}.exe")),
         None => Err(Error::Other("invalid application name".into())),
@@ -578,19 +580,24 @@ fn application_executable(name: &str) -> Result<String> {
 }
 
 fn absolute_executable(path: PathBuf) -> Option<PathBuf> {
-    if !path.is_absolute() || !path.extension()?.as_encoded_bytes().eq_ignore_ascii_case(b"exe") || !path.is_file() {
+    if !path.is_absolute()
+        || !path
+            .extension()?
+            .as_encoded_bytes()
+            .eq_ignore_ascii_case(b"exe")
+        || !path.is_file()
+    {
         return None;
     }
     Some(path)
 }
 
 fn registered_application(root: HKEY, executable: &str) -> Option<PathBuf> {
-    let key: Vec<u16> = format!(
-        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{executable}"
-    )
-    .encode_utf16()
-    .chain(Some(0))
-    .collect();
+    let key: Vec<u16> =
+        format!("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{executable}")
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
     let mut value = vec![0_u16; 32768];
     let mut bytes = (value.len() * size_of::<u16>()) as u32;
     // SAFETY: predefined registry root, NUL-terminated key, and a writable buffer
