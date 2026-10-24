@@ -351,7 +351,7 @@ pub(super) fn require_trust() -> Result<()> {
     }
 }
 
-const ACCESSIBILITY_DENIED: &str = "Offhand needs Accessibility access. macOS has opened a prompt; if not, enable the app that runs this command (your terminal for the CLI) in System Settings \u{2192} Privacy & Security \u{2192} Accessibility, then run the command again.";
+const ACCESSIBILITY_DENIED: &str = "Offhand needs Accessibility access. macOS may have shown a prompt; if not, enable the app that runs this command (your terminal for the CLI) in System Settings \u{2192} Privacy & Security \u{2192} Accessibility, then run the command again.";
 static ACCESSIBILITY_PROMPTED: AtomicBool = AtomicBool::new(false);
 
 /// Builds the denial error and asks macOS to show its Accessibility prompt, once per process.
@@ -446,5 +446,14 @@ mod tests {
         assert!(text.contains("Offhand needs Accessibility access"));
         assert!(text.contains("Privacy & Security \u{2192} Accessibility"));
         assert!(text.contains("run the command again"));
+    }
+
+    #[test]
+    fn repeated_denial_stays_fail_closed() {
+        // Skip the real prompt so the test never reaches FFI.
+        ACCESSIBILITY_PROMPTED.store(true, Ordering::SeqCst);
+        for _ in 0..2 {
+            assert!(matches!(accessibility_denied(), Error::PermissionDenied(_)));
+        }
     }
 }
