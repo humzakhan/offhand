@@ -6,7 +6,7 @@ Thanks for looking at Offhand. Keep changes focused and explain the why in the P
 
 - Rust 1.94, installed via [rustup](https://rustup.rs)
 - Node 22 or later
-- pnpm 10+ (`npm i -g pnpm` or see pnpm.io/installation)
+- pnpm 11 (pinned in `app/package.json`; `npm i -g pnpm` or see https://pnpm.io/installation)
 - macOS: Xcode Command Line Tools
 - Windows: MSVC Build Tools and the WebView2 runtime
 
