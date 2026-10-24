@@ -8,7 +8,7 @@ use offhand_platform::{
     Action, Element, ElementId, Error, Frame, Permission, Permissions, Platform, Rect, Result,
     Role, WindowId,
 };
-use std::{cell::RefCell, collections::HashMap, process::Command};
+use std::{cell::RefCell, collections::{HashMap, HashSet}, process::Command};
 
 /// macOS implementation of [`Platform`] (Accessibility API + `CoreGraphics`).
 #[derive(Debug, Default)]
@@ -30,7 +30,7 @@ impl Cache {
         if let Some((id, _)) = bucket.iter().find(|(_, old)| old.same(object)) {
             return Ok(id.clone());
         }
-        if self.element_count >= 4000 {
+        if self.element_count >= 4096 {
             return Err(Error::Other(
                 "accessibility reference limit reached; recapture target window".into(),
             ));
@@ -174,6 +174,13 @@ impl Platform for MacPlatform {
             let (_, window) = cache.window(id)?;
             let mut nodes = Vec::new();
             walk(&window, 0, &mut nodes, cache, &mut 2000)?;
+            // Preserve identities for live nodes, release references absent from the fresh snapshot.
+            let live: HashSet<_> = nodes.iter().map(|node| node.id.clone()).collect();
+            cache.elements.retain(|_, bucket| {
+                bucket.retain(|(id, _)| live.contains(id));
+                !bucket.is_empty()
+            });
+            cache.element_count = cache.elements.values().map(Vec::len).sum();
             Ok(nodes)
         })
     }

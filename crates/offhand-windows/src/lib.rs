@@ -111,7 +111,7 @@ impl State {
     }
     fn describe(&mut self, object: &IUIAutomationElement) -> Result<Element> {
         let id = runtime_id(object)?;
-        if !self.elements.contains_key(&id) && self.elements.len() >= 4000 {
+        if !self.elements.contains_key(&id) && self.elements.len() >= 4096 {
             return Err(Error::Other(
                 "UI Automation reference limit reached; recapture target".into(),
             ));
@@ -182,6 +182,8 @@ fn with_state<T>(operation: impl FnOnce(&mut State) -> Result<T>) -> Result<T> {
         )
     })
 }
+// Result::map_err transfers ownership of its source error to this converter.
+#[allow(clippy::needless_pass_by_value)]
 fn native_error(error: windows::core::Error) -> Error {
     if error.code().0 == 0x8007_0005_u32 as i32 {
         Error::PermissionDenied("Windows denied access (target may have higher integrity)".into())
@@ -433,7 +435,9 @@ impl Platform for WindowsPlatform {
             // SAFETY: apartment-local UIA receiver.
             let walker = unsafe { state.automation()?.RawViewWalker() }.map_err(native_error)?;
             let mut nodes = Vec::new();
-            walk(state, &walker, &root, 0, &mut nodes, &mut HashSet::new(), &mut 2000)?;
+            let mut seen = HashSet::new();
+            walk(state, &walker, &root, 0, &mut nodes, &mut seen, &mut 2000)?;
+            state.elements.retain(|id, _| seen.contains(id));
             Ok(nodes)
         })
     }
@@ -448,7 +452,7 @@ impl Platform for WindowsPlatform {
                 // SAFETY: HWND was validated and belongs to the captured external process.
                 if unsafe { IsIconic(hwnd) }.as_bool() {
                     // SAFETY: validated HWND; restore only the exact captured target.
-                    unsafe { ShowWindow(hwnd, SW_RESTORE) };
+                    let _ = unsafe { ShowWindow(hwnd, SW_RESTORE) };
                 }
                 // SAFETY: validated HWND. Windows may refuse foreground activation; detect that below.
                 if !unsafe { SetForegroundWindow(hwnd) }.as_bool() || foreground()? != hwnd {
@@ -537,9 +541,8 @@ impl Platform for WindowsPlatform {
                 return Ok(None);
             }
             // SAFETY: UIA receiver is apartment-local and initialized.
-            let object = match unsafe { state.automation()?.GetFocusedElement() } {
-                Ok(object) => object,
-                Err(_) => return Ok(None),
+            let Some(object) = optional_element(unsafe { state.automation()?.GetFocusedElement() })? else {
+                return Ok(None);
             };
             // SAFETY: retained UIA element; process identity checked before exposing its properties.
             if unsafe { object.CurrentProcessId() }.map_err(native_error)? as u32

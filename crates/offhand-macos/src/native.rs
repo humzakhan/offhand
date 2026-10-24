@@ -133,11 +133,13 @@ impl Object {
         Ok(value)
     }
     pub(super) fn children(&self, limit: usize) -> Result<Vec<Self>> {
+        let limit = limit.min(2000);
+        let native_limit = isize::try_from(limit).map_err(|e| Error::Other(e.to_string()))?;
         let name = Self::string("AXChildren")?;
         let mut raw = ptr::null();
         // SAFETY: valid AX receiver, CFString key and out pointer; limit is at most 2000.
         let result = unsafe {
-            AXUIElementCopyAttributeValues(self.0, name.0, 0, limit as isize, &raw mut raw)
+            AXUIElementCopyAttributeValues(self.0, name.0, 0, native_limit, &raw mut raw)
         };
         if result == -25205 || result == -25212 {
             return Ok(Vec::new());
@@ -152,8 +154,9 @@ impl Object {
         let count = unsafe { CFArrayGetCount(array.0) }.max(0) as usize;
         let mut result = Vec::new();
         for index in 0..count.min(limit) {
+            let index = isize::try_from(index).map_err(|e| Error::Other(e.to_string()))?;
             // SAFETY: index is in bounds; array retains its borrowed child during retain.
-            let child = unsafe { CFArrayGetValueAtIndex(array.0, index as isize) };
+            let child = unsafe { CFArrayGetValueAtIndex(array.0, index) };
             // SAFETY: array children are CF references; validate AX type before wrapping.
             if !child.is_null() && unsafe { CFGetTypeID(child) == AXUIElementGetTypeID() } {
                 // SAFETY: child is live and retained by array until this call completes.
@@ -247,7 +250,11 @@ impl Object {
         }
         // SAFETY: display ID was returned by CoreGraphics.
         let (frame, pixels) = unsafe { (CGDisplayBounds(display), CGDisplayPixelsWide(display)) };
-        let scale = pixels as f64 / frame.size.w;
+        let pixels = u32::try_from(pixels).map_err(|e| Error::Other(e.to_string()))?;
+        let scale = f64::from(pixels) / frame.size.w;
+        if !scale.is_finite() || scale <= 0.0 {
+            return Err(Error::Other("invalid display scale".into()));
+        }
         Ok(Rect {
             x: p.x * scale,
             y: p.y * scale,
