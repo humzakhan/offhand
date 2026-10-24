@@ -13,8 +13,10 @@ use offhand_platform::{
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet, VecDeque},
-    ffi::c_void,
+    ffi::{OsString, c_void},
     mem::size_of,
+    os::windows::ffi::{OsStrExt, OsStringExt},
+    path::{Path, PathBuf},
     ptr,
     time::{Duration, Instant},
 };
@@ -25,6 +27,7 @@ use windows::{
             GetSidSubAuthority, GetSidSubAuthorityCount, GetTokenInformation,
             TOKEN_MANDATORY_LABEL, TOKEN_QUERY, TokenIntegrityLevel,
         },
+        Storage::FileSystem::SearchPathW,
         System::{
             Com::{
                 CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
@@ -34,6 +37,8 @@ use windows::{
                 SafeArrayAccessData, SafeArrayDestroy, SafeArrayGetLBound, SafeArrayGetUBound,
                 SafeArrayUnaccessData,
             },
+            Registry::{HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW},
+            SystemInformation::GetSystemDirectoryW,
             Threading::{
                 GetCurrentProcess, GetCurrentProcessId, OpenProcess, OpenProcessToken,
                 PROCESS_QUERY_LIMITED_INFORMATION,
@@ -552,17 +557,131 @@ fn modifier_input(key: u16, up: bool) -> INPUT {
     }
     input(key, 0, flags)
 }
-fn launch(name: &str) -> Result<()> {
+// Accept names only; extensions other than .exe must never reach file associations.
+fn application_executable(name: &str) -> Result<String> {
     if name.trim().is_empty()
+        || name != name.trim()
         || name.starts_with('-')
-        || name.contains(['/', '\\', ':'])
-        || name.chars().any(char::is_control)
+        || name.contains("..")
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.'))
     {
         return Err(Error::Other("invalid application name".into()));
     }
-    let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+    match Path::new(name).extension() {
+        Some(extension) if extension.as_encoded_bytes().eq_ignore_ascii_case(b"exe") => {
+            Ok(name.to_owned())
+        }
+        Some(_) => Err(Error::Other("invalid application extension".into())),
+        None if !name.ends_with('.') => Ok(format!("{name}.exe")),
+        None => Err(Error::Other("invalid application name".into())),
+    }
+}
+
+fn absolute_executable(path: PathBuf) -> Option<PathBuf> {
+    if !path.is_absolute()
+        || !path
+            .extension()?
+            .as_encoded_bytes()
+            .eq_ignore_ascii_case(b"exe")
+        || !path.is_file()
+    {
+        return None;
+    }
+    Some(path)
+}
+
+fn registered_application(root: HKEY, executable: &str) -> Option<PathBuf> {
+    let key: Vec<u16> =
+        format!("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{executable}")
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+    let mut value = vec![0_u16; 32768];
+    let mut bytes = (value.len() * size_of::<u16>()) as u32;
+    // SAFETY: predefined registry root, NUL-terminated key, and a writable buffer
+    // whose byte capacity is supplied. REG_SZ also expands REG_EXPAND_SZ values.
+    let status = unsafe {
+        RegGetValueW(
+            root,
+            PCWSTR(key.as_ptr()),
+            PCWSTR::null(),
+            RRF_RT_REG_SZ,
+            None,
+            Some(value.as_mut_ptr().cast()),
+            Some(&raw mut bytes),
+        )
+    };
+    if status.is_err() {
+        return None;
+    }
+    let end = value.iter().position(|&c| c == 0)?;
+    let value = String::from_utf16(&value[..end]).ok()?;
+    // App Paths may quote the complete executable path, but may not add arguments.
+    let value = value
+        .strip_prefix('"')
+        .and_then(|v| v.strip_suffix('"'))
+        .unwrap_or(&value);
+    absolute_executable(PathBuf::from(value))
+}
+
+fn search_application(executable: &str) -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?.canonicalize().ok()?;
+    let mut system = vec![0_u16; 32768];
+    // SAFETY: writable UTF-16 buffer; the binding supplies its exact capacity.
+    let length = unsafe { GetSystemDirectoryW(Some(&mut system)) } as usize;
+    if length == 0 || length >= system.len() {
+        return None;
+    }
+    let system = PathBuf::from(OsString::from_wide(&system[..length]));
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let directories = std::iter::once(system)
+        .chain(std::env::split_paths(&path))
+        .filter(|dir| {
+            // Empty/relative entries can implicitly search the current directory.
+            dir.is_absolute()
+                && dir.canonicalize().is_ok_and(|absolute| {
+                    !absolute
+                        .as_os_str()
+                        .as_encoded_bytes()
+                        .eq_ignore_ascii_case(cwd.as_os_str().as_encoded_bytes())
+                })
+        });
+    let search = std::env::join_paths(directories).ok()?;
+    if search.is_empty() {
+        return None;
+    }
+    let search: Vec<u16> = search.encode_wide().chain(Some(0)).collect();
+    let executable: Vec<u16> = executable.encode_utf16().chain(Some(0)).collect();
+    let mut resolved = vec![0_u16; 32768];
+    // SAFETY: both inputs are NUL-terminated, the explicit path excludes cwd,
+    // and the output slice owns the full writable capacity passed to SearchPathW.
+    let length = unsafe {
+        SearchPathW(
+            PCWSTR(search.as_ptr()),
+            PCWSTR(executable.as_ptr()),
+            PCWSTR::null(),
+            Some(&mut resolved),
+            None,
+        )
+    } as usize;
+    if length == 0 || length >= resolved.len() {
+        return None;
+    }
+    absolute_executable(PathBuf::from(OsString::from_wide(&resolved[..length])))
+}
+
+fn launch(name: &str) -> Result<()> {
+    let executable = application_executable(name)?;
+    let resolved = registered_application(HKEY_CURRENT_USER, &executable)
+        .or_else(|| registered_application(HKEY_LOCAL_MACHINE, &executable))
+        .or_else(|| search_application(&executable))
+        .ok_or_else(|| Error::Other("application executable was not found".into()))?;
+    let name: Vec<u16> = resolved.as_os_str().encode_wide().chain(Some(0)).collect();
     let verb: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
-    // SAFETY: NUL-terminated strings live through call; no arguments, path, shell command or parent HWND.
+    // SAFETY: NUL-terminated strings live through call. Only a resolved absolute
+    // .exe path is launched, with no arguments, association lookup, or parent HWND.
     let result = unsafe {
         ShellExecuteW(
             None,

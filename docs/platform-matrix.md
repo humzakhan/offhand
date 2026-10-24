@@ -12,8 +12,8 @@ cross-check is not a parity proof. The shared contract suite has no assertions.
 | Secure field identity | PasswordField | PasswordField / IsPassword | Content need not be readable; typing requires confirmation |
 | Text input | CGEvent Unicode | SendInput UTF-16 | Up to 2,000 Unicode characters; controls other than newline/tab rejected before dispatch; newline/tab send Return/Tab; unknown focus requires confirmation |
 | Key/chord input | CGEvent | SendInput | Shared vocabulary; primary=Cmd / Ctrl; actual meta key stays distinct |
-| Application launch | open -a, one name argument | ShellExecute, no arguments | No shell strings, paths, URLs or options; settings apps require confirmation |
-| Launch name resolution | Launch Services application names | Executable / App Paths names | Windows: `calc` and `notepad` work; friendly display name `Calculator` does not resolve |
+| Application launch | open -a, one name argument | ShellExecute of a resolved absolute .exe, no arguments | Bare names only; Windows rejects paths, URLs, `..`, and extensions other than `.exe`; settings apps require confirmation |
+| Launch name resolution | Launch Services application names | HKCU → HKLM App Paths, then System32 / PATH excluding current and relative directories | Windows resolves only existing absolute `.exe` paths; no bare-name or file-association fallback; friendly display names may not resolve |
 | Launch permission | Accessibility trust required | No AX grant | macOS checks AX trust before every action, including OpenApp |
 | Window registry lifetime | Dead AX entries pruned, CF references released | Dead HWND / changed-process entries pruned | At 128 entries, evict the oldest non-target entry; retain the current target |
 | Captured-window restoration | AX/native activation | HWND foreground restoration | Failure enters Stuck; never silently type elsewhere |
