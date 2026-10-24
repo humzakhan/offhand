@@ -450,21 +450,8 @@ fn run<P: Platform>(
                 }
                 desktop::render(app, &ui);
                 desktop::emit(app, revision, &ui, false);
-                // Start the delay only after the native card has been shown.
-                confirmation_gate = if let UiState::AwaitConfirm {
-                    confirmation_id, ..
-                } = &ui
-                {
-                    app.get_webview_window("confirm")
-                        .filter(|window| window.is_visible().unwrap_or(false))
-                        .map(|_| ConfirmationGate {
-                            id: *confirmation_id,
-                            armed_at: Instant::now() + Duration::from_millis(400),
-                            announced: false,
-                        })
-                } else {
-                    None
-                };
+                // A new card must be observed visible before its delay starts.
+                confirmation_gate = None;
                 // State-scoped keys never remain installed after the applicable state ends.
                 if primary {
                     let _ = unbind(app, "CommandOrControl+Enter");
@@ -505,6 +492,22 @@ fn run<P: Platform>(
                 }
                 let _ = desktop::tray(app, &ui, &recent, &prefs.hotkey);
             }
+        }
+        if let UiState::AwaitConfirm {
+            confirmation_id, ..
+        } = &ui
+            && confirmation_gate.is_none()
+            && app
+                .get_webview_window("confirm")
+                .is_some_and(|window| window.is_visible().unwrap_or(false))
+        {
+            // Retry each loop: showing the native window can complete after render.
+            // Inputs queued before visibility (or during the delay) remain rejected.
+            confirmation_gate = Some(ConfirmationGate {
+                id: *confirmation_id,
+                armed_at: Instant::now() + Duration::from_millis(400),
+                announced: false,
+            });
         }
         if let Some(gate) = &mut confirmation_gate
             && !gate.announced
