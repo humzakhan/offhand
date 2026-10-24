@@ -18,3 +18,12 @@ path = "src/main.rs"
 [dependencies]
 offhand-core = { path = "../offhand-core" }
 clap = { version = "4", features = ["derive"] }
+offhand-platform = { path = "../offhand-platform" }
+offhand-infer = { path = "../offhand-infer" }
+ctrlc = "3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+offhand-macos = { path = "../offhand-macos" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+offhand-windows = { path = "../offhand-windows" }
