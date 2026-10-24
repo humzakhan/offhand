@@ -342,9 +342,13 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                 {
                     if let Some(waited) = focus_wait {
                         if waited >= 4 {
-                            self.stuck("The captured window could not be restored after five ticks");
+                            self.stuck(
+                                "The captured window could not be restored after five ticks",
+                            );
                         } else {
-                            self.stage = Stage::Ready { focus_wait: Some(waited + 1) };
+                            self.stage = Stage::Ready {
+                                focus_wait: Some(waited + 1),
+                            };
                         }
                         return Ok(());
                     }
@@ -365,7 +369,9 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                 if current != previous {
                     self.revalidation_mismatches += 1;
                     if self.revalidation_mismatches >= 3 {
-                        self.stuck("The target changed three times during revalidation; retry explicitly");
+                        self.stuck(
+                            "The target changed three times during revalidation; retry explicitly",
+                        );
                     } else {
                         self.present(current)?;
                     }
@@ -405,7 +411,10 @@ impl<P: Platform, E: Engine> Agent<P, E> {
         } else {
             "Action dispatched; result unverified because the tree is unavailable"
         };
-        self.emit(UiState::Done { summary: summary.into(), undoable: false });
+        self.emit(UiState::Done {
+            summary: summary.into(),
+            undoable: false,
+        });
         Ok(())
     }
 
@@ -454,14 +463,22 @@ impl<P: Platform, E: Engine> Agent<P, E> {
         self.approved = false;
         let target = pending.target();
         let label = if matches!(pending.action, Action::Press(_) | Action::Click { .. }) {
-            pending.element.as_ref().and_then(|element| element.label.clone())
-        } else { None }.unwrap_or_else(|| self.command.as_ref().map_or_else(|| "Action".into(), Command::label));
+            pending
+                .element
+                .as_ref()
+                .and_then(|element| element.label.clone())
+        } else {
+            None
+        }
+        .unwrap_or_else(|| {
+            self.command
+                .as_ref()
+                .map_or_else(|| "Action".into(), Command::label)
+        });
         let detail = confirmation_detail(&pending);
         let risk = offhand_policy::classify(&pending.action, pending.element.as_ref());
         self.pending = Some(pending);
-        self.stage = Stage::Ready {
-            focus_wait: None,
-        };
+        self.stage = Stage::Ready { focus_wait: None };
         match risk {
             Risk::Safe => self.running(target),
             Risk::Confirm => {
@@ -572,36 +589,69 @@ fn confirmation_detail(pending: &Pending) -> Option<String> {
         Action::Type(text) => {
             let password = pending.element.as_ref().is_some_and(|element| {
                 element.role == offhand_platform::Role::PasswordField
-                    || element.label.as_ref().is_some_and(|label| label.to_lowercase().contains("password"))
+                    || element
+                        .label
+                        .as_ref()
+                        .is_some_and(|label| label.to_lowercase().contains("password"))
             });
-            if password { Some("Password field") }
-            else if pending.element.is_none() { Some("No focused field") }
-            else if text.contains(['\n', '\r']) { Some("Multiline text") }
-            else { None }
+            if password {
+                Some("Password field")
+            } else if pending.element.is_none() {
+                Some("No focused field")
+            } else if text.contains(['\n', '\r']) {
+                Some("Multiline text")
+            } else {
+                None
+            }
         }
         Action::Key(_) => Some("Key shortcut"),
         Action::OpenApp(_) => Some("System settings"),
-        Action::Press(_) | Action::Click { .. } | Action::FocusWindow(_) | Action::Scroll { .. } => None,
+        Action::Press(_)
+        | Action::Click { .. }
+        | Action::FocusWindow(_)
+        | Action::Scroll { .. } => None,
     };
     detail.map(str::to_owned)
 }
 
 fn unique_match<'a>(tree: &'a [Element], query: &str) -> Option<&'a Element> {
-    if query.is_empty() { return None; }
+    if query.is_empty() {
+        return None;
+    }
     let lower = query.to_lowercase();
     // Include disabled matches in the exact tiers: never redirect an exact
     // disabled target to a different enabled element with a longer label.
     for case_sensitive in [true, false] {
-        let matches: Vec<_> = tree.iter().filter(|element| element.label.as_ref().is_some_and(|label| {
-            if case_sensitive { label == query } else { label.to_lowercase() == lower }
-        })).collect();
+        let matches: Vec<_> = tree
+            .iter()
+            .filter(|element| {
+                element.label.as_ref().is_some_and(|label| {
+                    if case_sensitive {
+                        label == query
+                    } else {
+                        label.to_lowercase() == lower
+                    }
+                })
+            })
+            .collect();
         if !matches.is_empty() {
-            return if matches.len() == 1 && matches[0].enabled { Some(matches[0]) } else { None };
+            return if matches.len() == 1 && matches[0].enabled {
+                Some(matches[0])
+            } else {
+                None
+            };
         }
     }
     let mut matches = tree.iter().filter(|e| {
-        e.enabled && e.label.as_ref().is_some_and(|label| label.to_lowercase().contains(&lower))
+        e.enabled
+            && e.label
+                .as_ref()
+                .is_some_and(|label| label.to_lowercase().contains(&lower))
     });
     let first = matches.next()?;
-    if matches.next().is_some() { None } else { Some(first) }
+    if matches.next().is_some() {
+        None
+    } else {
+        Some(first)
+    }
 }

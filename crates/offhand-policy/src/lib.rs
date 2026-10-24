@@ -63,7 +63,10 @@ pub fn classify(action: &Action, target: Option<&Element>) -> Risk {
             }
         }
         Action::Type(text) => {
-            if text.chars().any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r')) {
+            if text
+                .chars()
+                .any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r'))
+            {
                 return Risk::Block;
             }
             if target.is_none()
