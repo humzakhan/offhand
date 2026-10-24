@@ -40,6 +40,10 @@ pub trait Engine {
 #[derive(Debug, Default)]
 pub struct NoopEngine;
 impl Engine for NoopEngine {
-    fn choose(&self, _frame: &Frame, _task: &str, _options: &[Element]) -> Result<Choice> { Err(Error::Unimplemented) }
-    fn ground(&self, _frame: &Frame, _task: &str) -> Result<(f64, f64)> { Err(Error::Unimplemented) }
+    fn choose(&self, _frame: &Frame, _task: &str, _options: &[Element]) -> Result<Choice> {
+        Err(Error::Unimplemented)
+    }
+    fn ground(&self, _frame: &Frame, _task: &str) -> Result<(f64, f64)> {
+        Err(Error::Unimplemented)
+    }
 }

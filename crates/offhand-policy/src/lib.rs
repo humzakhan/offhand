@@ -21,36 +21,81 @@ const RISKY_WORDS: [&str; 8] = [
 /// Classify every native action. Block never has an approval bypass.
 #[must_use]
 pub fn classify(action: &Action, target: Option<&Element>) -> Risk {
-    let label = target.and_then(|e| e.label.as_deref()).unwrap_or_default().to_lowercase();
+    let label = target
+        .and_then(|e| e.label.as_deref())
+        .unwrap_or_default()
+        .to_lowercase();
     match action {
         Action::FocusWindow(_) | Action::Scroll { .. } => Risk::Safe,
         Action::OpenApp(name) => {
             let name = name.trim();
-            if name.is_empty() || name.starts_with('-') || name.contains(['/', '\\', ':'])
-                || name.chars().any(char::is_control) { return Risk::Block; }
+            if name.is_empty()
+                || name.starts_with('-')
+                || name.contains(['/', '\\', ':'])
+                || name.chars().any(char::is_control)
+            {
+                return Risk::Block;
+            }
             let name = name.to_lowercase();
-            let name = name.strip_suffix(".app").or_else(|| name.strip_suffix(".exe")).unwrap_or(&name);
-            let normalized: String = name.chars().filter(|c| !matches!(c, ' ' | '-' | '_')).collect();
-            if ["systemsettings", "systempreferences", "settings", "controlpanel", "control"].contains(&normalized.as_str()) {
+            let name = name
+                .strip_suffix(".app")
+                .or_else(|| name.strip_suffix(".exe"))
+                .unwrap_or(&name);
+            let normalized: String = name
+                .chars()
+                .filter(|c| !matches!(c, ' ' | '-' | '_'))
+                .collect();
+            if [
+                "systemsettings",
+                "systempreferences",
+                "settings",
+                "controlpanel",
+                "control",
+            ]
+            .contains(&normalized.as_str())
+            {
                 Risk::Confirm
-            } else { Risk::Safe }
+            } else {
+                Risk::Safe
+            }
         }
         Action::Type(text) => {
-            if target.is_none() || target.is_some_and(|e| e.role == offhand_platform::Role::PasswordField)
-                || label.contains("password") || text.contains(['\n', '\r']) { Risk::Confirm }
-            else { Risk::Safe }
+            if target.is_none()
+                || target.is_some_and(|e| e.role == offhand_platform::Role::PasswordField)
+                || label.contains("password")
+                || text.contains(['\n', '\r'])
+            {
+                Risk::Confirm
+            } else {
+                Risk::Safe
+            }
         }
         Action::Press(_) | Action::Click { .. } => {
-            let normalized = label.split(|c: char| !c.is_alphanumeric()).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ");
-            if normalized.contains("empty trash") || normalized.contains("empty recycle bin") { Risk::Block }
-            else if RISKY_WORDS.iter().any(|word| label.contains(word)) { Risk::Confirm }
-            else { Risk::Safe }
+            let normalized = label
+                .split(|c: char| !c.is_alphanumeric())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+            if normalized.contains("empty trash") || normalized.contains("empty recycle bin") {
+                Risk::Block
+            } else if RISKY_WORDS.iter().any(|word| label.contains(word)) {
+                Risk::Confirm
+            } else {
+                Risk::Safe
+            }
         }
         Action::Key(key) => {
             let key = key.to_ascii_lowercase();
-            if key.split('+').any(|part| matches!(part, "escape" | "esc")) { Risk::Block }
-            else if matches!(key.as_str(), "tab" | "left" | "right" | "up" | "down" | "home" | "end" | "pageup" | "pagedown") { Risk::Safe }
-            else { Risk::Confirm }
+            if key.split('+').any(|part| matches!(part, "escape" | "esc")) {
+                Risk::Block
+            } else if matches!(
+                key.as_str(),
+                "tab" | "left" | "right" | "up" | "down" | "home" | "end" | "pageup" | "pagedown"
+            ) {
+                Risk::Safe
+            } else {
+                Risk::Confirm
+            }
         }
     }
 }

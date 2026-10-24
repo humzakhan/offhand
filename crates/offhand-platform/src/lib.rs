@@ -135,7 +135,10 @@ impl std::fmt::Debug for Frame {
 
 /// A fixed native permission flow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Permission { Accessibility, ScreenRecording }
+pub enum Permission {
+    Accessibility,
+    ScreenRecording,
+}
 /// Native grant status; None means no grant is required.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Permissions {
@@ -151,8 +154,16 @@ pub trait Platform {
     fn capture(&self, region: Option<Rect>) -> Result<Frame>;
     /// Perform an action.
     fn act(&self, action: &Action) -> Result<()>;
-    fn foreground_window(&self) -> Result<WindowId> { Err(Error::Unimplemented) }
-    fn focused_element(&self, _window: Option<WindowId>) -> Result<Option<Element>> { Ok(None) }
-    fn permissions(&self) -> Permissions { Permissions::default() }
-    fn request_permission(&self, _permission: Permission) -> Result<()> { Err(Error::Unimplemented) }
+    fn foreground_window(&self) -> Result<WindowId> {
+        Err(Error::Unimplemented)
+    }
+    fn focused_element(&self, _window: Option<WindowId>) -> Result<Option<Element>> {
+        Ok(None)
+    }
+    fn permissions(&self) -> Permissions {
+        Permissions::default()
+    }
+    fn request_permission(&self, _permission: Permission) -> Result<()> {
+        Err(Error::Unimplemented)
+    }
 }

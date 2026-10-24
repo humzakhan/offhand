@@ -41,7 +41,11 @@ pub struct Target {
 pub enum UiState {
     Idle,
     Listening,
-    Running { step: u32, total: u32, target: Option<Target> },
+    Running {
+        step: u32,
+        total: u32,
+        target: Option<Target>,
+    },
     AwaitConfirm {
         confirmation_id: u64,
         label: String,
@@ -49,16 +53,29 @@ pub enum UiState {
         detail: Option<String>,
         target: Option<Target>,
     },
-    Blocked { label: String, target: Option<Target> },
-    Stuck { query: String, cloud_available: bool },
+    Blocked {
+        label: String,
+        target: Option<Target>,
+    },
+    Stuck {
+        query: String,
+        cloud_available: bool,
+    },
     Paused,
-    Done { summary: String, undoable: bool },
+    Done {
+        summary: String,
+        undoable: bool,
+    },
 }
 
 /// An explicit decision for exactly one pending action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ConfirmationDecision { Allow, Skip, Stop }
+pub enum ConfirmationDecision {
+    Allow,
+    Skip,
+    Stop,
+}
 
 /// Runner failures. Resolution failures also publish a Stuck state.
 #[derive(Debug, thiserror::Error)]
@@ -75,7 +92,13 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Clone)]
-enum Command { Open(String), Click(String), Type(String), Key(String), Press(String) }
+enum Command {
+    Open(String),
+    Click(String),
+    Type(String),
+    Key(String),
+    Press(String),
+}
 
 impl Command {
     fn parse(input: &str) -> Option<Self> {
@@ -84,17 +107,25 @@ impl Command {
         let verb = input[..split].to_ascii_lowercase();
         // Consume only the separator, preserving the text suffix verbatim.
         let text = input[split..].strip_prefix(char::is_whitespace)?;
-        if text.is_empty() { return None; }
+        if text.is_empty() {
+            return None;
+        }
         match verb.as_str() {
             "open" => Some(Self::Open(text.to_owned())),
             "click" => Some(Self::Click(text.to_owned())),
             "type" => Some(Self::Type(text.to_owned())),
             "press" => {
                 let text = text.trim();
-                if reserved_key(text) { return None; }
-                if let Some(key) = canonical_key(text) { Some(Self::Key(key)) }
-                else if text.contains('+') { None }
-                else { Some(Self::Press(text.to_owned())) }
+                if reserved_key(text) {
+                    return None;
+                }
+                if let Some(key) = canonical_key(text) {
+                    Some(Self::Key(key))
+                } else if text.contains('+') {
+                    None
+                } else {
+                    Some(Self::Press(text.to_owned()))
+                }
             }
             _ => None,
         }
@@ -111,7 +142,9 @@ impl Command {
 }
 
 fn reserved_key(input: &str) -> bool {
-    input.split('+').any(|part| matches!(part.trim().to_ascii_lowercase().as_str(), "esc" | "escape"))
+    input
+        .split('+')
+        .any(|part| matches!(part.trim().to_ascii_lowercase().as_str(), "esc" | "escape"))
 }
 
 fn canonical_key(input: &str) -> Option<String> {
@@ -120,18 +153,34 @@ fn canonical_key(input: &str) -> Option<String> {
     let mut output = Vec::new();
     for modifier in modifiers {
         let modifier = modifier.to_ascii_lowercase();
-        if !matches!(modifier.as_str(), "ctrl" | "alt" | "shift" | "meta" | "primary")
-            || output.contains(&modifier) { return None; }
+        if !matches!(
+            modifier.as_str(),
+            "ctrl" | "alt" | "shift" | "meta" | "primary"
+        ) || output.contains(&modifier)
+        {
+            return None;
+        }
         output.push(modifier);
     }
     let lower = base.to_ascii_lowercase();
     let name = match lower.as_str() {
-        "enter" => "Enter", "tab" => "Tab", "space" => "Space",
-        "backspace" => "Backspace", "delete" => "Delete",
-        "left" => "Left", "right" => "Right", "up" => "Up", "down" => "Down",
-        "home" => "Home", "end" => "End", "pageup" => "PageUp", "pagedown" => "PageDown",
+        "enter" => "Enter",
+        "tab" => "Tab",
+        "space" => "Space",
+        "backspace" => "Backspace",
+        "delete" => "Delete",
+        "left" => "Left",
+        "right" => "Right",
+        "up" => "Up",
+        "down" => "Down",
+        "home" => "Home",
+        "end" => "End",
+        "pageup" => "PageUp",
+        "pagedown" => "PageDown",
         _ => {
-            let function_key = lower.strip_prefix('f').and_then(|n| n.parse::<u8>().ok())
+            let function_key = lower
+                .strip_prefix('f')
+                .and_then(|n| n.parse::<u8>().ok())
                 .is_some_and(|n| (1..=12).contains(&n));
             if function_key || (lower.len() == 1 && lower.as_bytes()[0].is_ascii_alphanumeric()) {
                 output.push(lower.to_ascii_uppercase());
@@ -145,19 +194,34 @@ fn canonical_key(input: &str) -> Option<String> {
 }
 
 #[derive(Clone, PartialEq)]
-struct Pending { action: Action, element: Option<Element>, window: Option<WindowId> }
+struct Pending {
+    action: Action,
+    element: Option<Element>,
+    window: Option<WindowId>,
+}
 
 impl Pending {
     fn target(&self) -> Option<Target> {
         self.element.as_ref().map(|element| Target {
-            label: element.label.clone().unwrap_or_else(|| "Focused field".into()),
-            bounds: Bounds { x: element.bounds.x, y: element.bounds.y, w: element.bounds.w, h: element.bounds.h },
+            label: element
+                .label
+                .clone()
+                .unwrap_or_else(|| "Focused field".into()),
+            bounds: Bounds {
+                x: element.bounds.x,
+                y: element.bounds.y,
+                w: element.bounds.w,
+                h: element.bounds.h,
+            },
         })
     }
 }
 
 #[derive(Clone, Copy)]
-enum Stage { Resolve, Ready { focus_attempted: bool } }
+enum Stage {
+    Resolve,
+    Ready { focus_attempted: bool },
+}
 
 /// Drives a platform on its owning thread; inference is deliberately unused in T0.
 pub struct Agent<P: Platform, E: Engine> {
@@ -176,7 +240,9 @@ pub struct Agent<P: Platform, E: Engine> {
 // Do not expose command text or typed secrets through diagnostic formatting.
 impl<P: Platform, E: Engine> std::fmt::Debug for Agent<P, E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Agent").field("state", &self.state).finish_non_exhaustive()
+        f.debug_struct("Agent")
+            .field("state", &self.state)
+            .finish_non_exhaustive()
     }
 }
 
@@ -184,14 +250,25 @@ impl<P: Platform, E: Engine> Agent<P, E> {
     /// Construct a runner on the same thread that owns the platform.
     #[must_use]
     pub fn new(platform: P, engine: E) -> Self {
-        Self { platform, _engine: engine, state: UiState::Idle, subscribers: Vec::new(),
-            command: None, window: None, pending: None, stage: Stage::Resolve,
-            confirmation_id: 0, approved: false }
+        Self {
+            platform,
+            _engine: engine,
+            state: UiState::Idle,
+            subscribers: Vec::new(),
+            command: None,
+            window: None,
+            pending: None,
+            stage: Stage::Resolve,
+            confirmation_id: 0,
+            approved: false,
+        }
     }
 
     /// Current public state; accepting a command does not imply completion.
     #[must_use]
-    pub fn state(&self) -> &UiState { &self.state }
+    pub fn state(&self) -> &UiState {
+        &self.state
+    }
 
     /// Subscribe to the current state immediately and every subsequent transition.
     pub fn subscribe(&mut self) -> Receiver<UiState> {
@@ -203,7 +280,8 @@ impl<P: Platform, E: Engine> Agent<P, E> {
 
     fn emit(&mut self, state: UiState) {
         self.state = state;
-        self.subscribers.retain(|tx| tx.send(self.state.clone()).is_ok());
+        self.subscribers
+            .retain(|tx| tx.send(self.state.clone()).is_ok());
     }
 
     /// Capture the external window before the shell activates its command bar.
@@ -221,43 +299,69 @@ impl<P: Platform, E: Engine> Agent<P, E> {
         }
         self.clear_task();
         self.command = Command::parse(command);
-        if self.command.is_some() { self.running(None); }
-        else { self.stuck("Use open <app>, click <label>, type <text>, or press <key-or-label>"); }
+        if self.command.is_some() {
+            self.running(None);
+        } else {
+            self.stuck("Use open <app>, click <label>, type <text>, or press <key-or-label>");
+        }
         Ok(())
     }
 
     /// Resolve or dispatch at most one native action, without sleeping or inference.
     pub fn tick(&mut self) -> Result<()> {
-        if !matches!(self.state, UiState::Running { .. }) { return Ok(()); }
+        if !matches!(self.state, UiState::Running { .. }) {
+            return Ok(());
+        }
         let result = self.advance();
-        if result.is_err() { self.stuck("Native operation failed; inspect permissions and retry explicitly"); }
+        if result.is_err() {
+            self.stuck("Native operation failed; inspect permissions and retry explicitly");
+        }
         result
     }
 
     fn advance(&mut self) -> Result<()> {
         match self.stage {
             Stage::Resolve => {
-                if let Some(pending) = self.resolve()? { self.present(pending)?; }
+                if let Some(pending) = self.resolve()? {
+                    self.present(pending)?;
+                }
             }
             Stage::Ready { focus_attempted } => {
-                let Some(previous) = self.pending.clone() else { return Ok(()); };
+                let Some(previous) = self.pending.clone() else {
+                    return Ok(());
+                };
                 if let Some(window) = previous.window {
                     if self.platform.foreground_window()? != window {
-                        if focus_attempted { self.stuck("The captured window could not be restored"); return Ok(()); }
+                        if focus_attempted {
+                            self.stuck("The captured window could not be restored");
+                            return Ok(());
+                        }
                         let action = Action::FocusWindow(window);
                         if offhand_policy::classify(&action, None) != Risk::Safe {
-                            self.stuck("Window restoration was rejected"); return Ok(());
+                            self.stuck("Window restoration was rejected");
+                            return Ok(());
                         }
                         self.platform.act(&action)?;
-                        self.stage = Stage::Ready { focus_attempted: true };
+                        self.stage = Stage::Ready {
+                            focus_attempted: true,
+                        };
                         return Ok(());
                     }
                 }
-                let Some(current) = self.resolve()? else { return Ok(()); };
-                if current != previous { self.present(current)?; return Ok(()); }
+                let Some(current) = self.resolve()? else {
+                    return Ok(());
+                };
+                if current != previous {
+                    self.present(current)?;
+                    return Ok(());
+                }
                 match offhand_policy::classify(&current.action, current.element.as_ref()) {
-                    Risk::Block => { self.present(current)?; }
-                    Risk::Confirm if !self.approved => { self.present(current)?; }
+                    Risk::Block => {
+                        self.present(current)?;
+                    }
+                    Risk::Confirm if !self.approved => {
+                        self.present(current)?;
+                    }
                     Risk::Safe | Risk::Confirm => {
                         // This is the sole task dispatch path. Approval is consumed even on failure.
                         self.approved = false;
@@ -269,7 +373,10 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                             self.stuck("Action dispatched, but the refreshed tree is unavailable; verify manually");
                         } else {
                             self.command = None;
-                            self.emit(UiState::Done { summary: "Action dispatched; verify the result in the app".into(), undoable: false });
+                            self.emit(UiState::Done {
+                                summary: "Action dispatched; verify the result in the app".into(),
+                                undoable: false,
+                            });
                         }
                     }
                 }
@@ -279,11 +386,20 @@ impl<P: Platform, E: Engine> Agent<P, E> {
     }
 
     fn resolve(&mut self) -> Result<Option<Pending>> {
-        let Some(command) = self.command.clone() else { return Ok(None); };
+        let Some(command) = self.command.clone() else {
+            return Ok(None);
+        };
         if let Command::Open(name) = command {
-            return Ok(Some(Pending { action: Action::OpenApp(name), element: None, window: None }));
+            return Ok(Some(Pending {
+                action: Action::OpenApp(name),
+                element: None,
+                window: None,
+            }));
         }
-        let Some(window) = self.window else { self.stuck("No external target window was captured"); return Ok(None); };
+        let Some(window) = self.window else {
+            self.stuck("No external target window was captured");
+            return Ok(None);
+        };
         let (action, element) = match command {
             Command::Click(label) | Command::Press(label) => {
                 let tree = self.platform.tree(Some(window))?;
@@ -293,26 +409,49 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                 };
                 (Action::Press(element.id.clone()), Some(element.clone()))
             }
-            Command::Type(text) => (Action::Type(text), self.platform.focused_element(Some(window))?),
-            Command::Key(key) => (Action::Key(key), self.platform.focused_element(Some(window))?),
+            Command::Type(text) => (
+                Action::Type(text),
+                self.platform.focused_element(Some(window))?,
+            ),
+            Command::Key(key) => (
+                Action::Key(key),
+                self.platform.focused_element(Some(window))?,
+            ),
             Command::Open(_) => return Ok(None),
         };
-        Ok(Some(Pending { action, element, window: Some(window) }))
+        Ok(Some(Pending {
+            action,
+            element,
+            window: Some(window),
+        }))
     }
 
     fn present(&mut self, pending: Pending) -> Result<()> {
         self.approved = false;
         let target = pending.target();
-        let label = self.command.as_ref().map_or_else(|| "Action".into(), Command::label);
+        let label = self
+            .command
+            .as_ref()
+            .map_or_else(|| "Action".into(), Command::label);
         let risk = offhand_policy::classify(&pending.action, pending.element.as_ref());
         self.pending = Some(pending);
-        self.stage = Stage::Ready { focus_attempted: false };
+        self.stage = Stage::Ready {
+            focus_attempted: false,
+        };
         match risk {
             Risk::Safe => self.running(target),
             Risk::Confirm => {
-                self.confirmation_id = self.confirmation_id.checked_add(1).ok_or(Error::ConfirmationExhausted)?;
-                self.emit(UiState::AwaitConfirm { confirmation_id: self.confirmation_id, label,
-                    app: "active app".into(), detail: None, target });
+                self.confirmation_id = self
+                    .confirmation_id
+                    .checked_add(1)
+                    .ok_or(Error::ConfirmationExhausted)?;
+                self.emit(UiState::AwaitConfirm {
+                    confirmation_id: self.confirmation_id,
+                    label,
+                    app: "active app".into(),
+                    detail: None,
+                    target,
+                });
             }
             Risk::Block => self.emit(UiState::Blocked { label, target }),
         }
@@ -321,7 +460,8 @@ impl<P: Platform, E: Engine> Agent<P, E> {
 
     /// Accept a decision only for the currently pending confirmation.
     pub fn respond(&mut self, confirmation_id: u64, decision: ConfirmationDecision) -> Result<()> {
-        if !matches!(self.state, UiState::AwaitConfirm { confirmation_id: id, .. } if id == confirmation_id) {
+        if !matches!(self.state, UiState::AwaitConfirm { confirmation_id: id, .. } if id == confirmation_id)
+        {
             return Err(Error::StaleConfirmation);
         }
         match decision {
@@ -331,7 +471,10 @@ impl<P: Platform, E: Engine> Agent<P, E> {
             }
             ConfirmationDecision::Skip => {
                 self.clear_task();
-                self.emit(UiState::Done { summary: "Skipped".into(), undoable: false });
+                self.emit(UiState::Done {
+                    summary: "Skipped".into(),
+                    undoable: false,
+                });
             }
             ConfirmationDecision::Stop => self.stop(),
         }
@@ -340,7 +483,10 @@ impl<P: Platform, E: Engine> Agent<P, E> {
 
     /// Pause a live task and revoke any pending approval.
     pub fn pause(&mut self) {
-        if matches!(self.state, UiState::Running { .. } | UiState::AwaitConfirm { .. }) {
+        if matches!(
+            self.state,
+            UiState::Running { .. } | UiState::AwaitConfirm { .. }
+        ) {
             self.pending = None;
             self.approved = false;
             self.stage = Stage::Resolve;
@@ -374,24 +520,49 @@ impl<P: Platform, E: Engine> Agent<P, E> {
     }
 
     fn running(&mut self, target: Option<Target>) {
-        self.emit(UiState::Running { step: 1, total: 1, target });
+        self.emit(UiState::Running {
+            step: 1,
+            total: 1,
+            target,
+        });
     }
 
     fn stuck(&mut self, query: &str) {
         self.pending = None;
         self.approved = false;
         self.stage = Stage::Resolve;
-        self.emit(UiState::Stuck { query: query.into(), cloud_available: false });
+        self.emit(UiState::Stuck {
+            query: query.into(),
+            cloud_available: false,
+        });
     }
 }
 
 fn unique_match<'a>(tree: &'a [Element], query: &str) -> Option<&'a Element> {
-    if query.is_empty() { return None; }
-    let exact: Vec<_> = tree.iter().filter(|e| e.enabled && e.label.as_deref() == Some(query)).collect();
-    if exact.len() == 1 { return exact.first().copied(); }
-    if exact.len() > 1 { return None; }
+    if query.is_empty() {
+        return None;
+    }
+    let exact: Vec<_> = tree
+        .iter()
+        .filter(|e| e.enabled && e.label.as_deref() == Some(query))
+        .collect();
+    if exact.len() == 1 {
+        return exact.first().copied();
+    }
+    if exact.len() > 1 {
+        return None;
+    }
     let lower = query.to_lowercase();
-    let mut matches = tree.iter().filter(|e| e.enabled && e.label.as_ref().is_some_and(|label| label.to_lowercase().contains(&lower)));
+    let mut matches = tree.iter().filter(|e| {
+        e.enabled
+            && e.label
+                .as_ref()
+                .is_some_and(|label| label.to_lowercase().contains(&lower))
+    });
     let first = matches.next()?;
-    if matches.next().is_some() { None } else { Some(first) }
+    if matches.next().is_some() {
+        None
+    } else {
+        Some(first)
+    }
 }
