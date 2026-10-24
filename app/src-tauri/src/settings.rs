@@ -13,7 +13,10 @@ pub struct Preferences {
 }
 impl Default for Preferences {
     fn default() -> Self {
-        Self { hotkey: "Alt+Space".into(), first_run_complete: false }
+        Self {
+            hotkey: "Alt+Space".into(),
+            first_run_complete: false,
+        }
     }
 }
 #[derive(Debug, Clone, Serialize)]
@@ -37,12 +40,19 @@ pub struct PermissionSnapshot {
 }
 impl From<offhand_platform::Permissions> for PermissionSnapshot {
     fn from(value: offhand_platform::Permissions) -> Self {
-        Self { accessibility: value.accessibility, screen_recording: value.screen_recording }
+        Self {
+            accessibility: value.accessibility,
+            screen_recording: value.screen_recording,
+        }
     }
 }
 impl Preferences {
     fn path(app: &AppHandle) -> Result<PathBuf, AppError> {
-        Ok(app.path().app_config_dir().map_err(AppError::storage)?.join("preferences.json"))
+        Ok(app
+            .path()
+            .app_config_dir()
+            .map_err(AppError::storage)?
+            .join("preferences.json"))
     }
     pub fn load(app: &AppHandle) -> Result<Self, AppError> {
         let path = Self::path(app)?;
@@ -54,16 +64,30 @@ impl Preferences {
     }
     pub fn save(&self, app: &AppHandle) -> Result<(), AppError> {
         let path = Self::path(app)?;
-        let parent = path.parent().ok_or_else(|| AppError::storage("missing config directory"))?;
+        let parent = path
+            .parent()
+            .ok_or_else(|| AppError::storage("missing config directory"))?;
         fs::create_dir_all(parent).map_err(AppError::storage)?;
         let bytes = serde_json::to_vec(self).map_err(AppError::storage)?;
         fs::write(path, bytes).map_err(AppError::storage)
     }
     pub fn snapshot(&self) -> SettingsSnapshot {
         SettingsSnapshot {
-            platform: if cfg!(target_os = "macos") { "macos" } else if cfg!(target_os = "windows") { "windows" } else { "unsupported" },
-            hotkey: self.hotkey.clone(), first_run_complete: self.first_run_complete,
-            model: ModelSnapshot { id: "qwen3.5-4b", status: "unavailable", progress: 0 }, cloud_enabled: false,
+            platform: if cfg!(target_os = "macos") {
+                "macos"
+            } else if cfg!(target_os = "windows") {
+                "windows"
+            } else {
+                "unsupported"
+            },
+            hotkey: self.hotkey.clone(),
+            first_run_complete: self.first_run_complete,
+            model: ModelSnapshot {
+                id: "qwen3.5-4b",
+                status: "unavailable",
+                progress: 0,
+            },
+            cloud_enabled: false,
         }
     }
 }

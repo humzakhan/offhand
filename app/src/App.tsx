@@ -14,7 +14,7 @@ function Brand() { return <div className="brand"><span className="mark">↗</spa
 function useAgentState() {
   const [event, setEvent] = useState<StateEvent>({ revision: 0, ui: { state: "idle" } });
   useEffect(() => {
-    const unlisten = listen<StateEvent>("offhand://state", ({ payload }) => setEvent(old => payload.revision >= old.revision ? payload : old));
+    const unlisten = listen<StateEvent>("offhand://state", ({ payload }) => setEvent(old => payload.revision > old.revision ? payload : old));
     return () => { void unlisten.then(fn => fn()); };
   }, []);
   return event;
@@ -27,6 +27,7 @@ function Command({ ui }: { ui: UiState }) {
   useEffect(() => { if (ui.state === "listening") { setCommand(""); setError(""); setBusy(false); input.current?.focus(); } }, [ui.state]);
   useEffect(() => {
     const onError = (event: Event) => { setBusy(false); setError(String((event as CustomEvent).detail)); };
+    if (window.__OFFHAND_ERROR__) setError(window.__OFFHAND_ERROR__);
     window.addEventListener("offhand-error", onError);
     return () => window.removeEventListener("offhand-error", onError);
   }, []);
@@ -41,10 +42,15 @@ function Command({ ui }: { ui: UiState }) {
   </form>;
 }
 type Geometry = { x: number; y: number; scale: number; bottom: number };
-declare global { interface Window { __OFFHAND_MONITOR__?: Geometry } }
+declare global { interface Window { __OFFHAND_MONITOR__?: Geometry; __OFFHAND_ERROR__?: string } }
 function Overlay({ event }: { event: StateEvent }) {
   const { ui } = event;
-  const geometry = window.__OFFHAND_MONITOR__ ?? { x: 0, y: 0, scale: 1, bottom: 20 };
+  const [geometry, setGeometry] = useState<Geometry>(window.__OFFHAND_MONITOR__ ?? { x: 0, y: 0, scale: 1, bottom: 20 });
+  useEffect(() => {
+    const update = (event: Event) => setGeometry((event as CustomEvent<Geometry>).detail);
+    window.addEventListener("offhand-monitor", update);
+    return () => window.removeEventListener("offhand-monitor", update);
+  }, []);
   const target = "target" in ui ? ui.target : null;
   return <main className="overlay" aria-live="polite">
     {target && <div className={`ring ${ui.state === "await_confirm" ? "amber" : ui.state === "blocked" ? "red" : ""}`} style={{ left: (target.bounds.x - geometry.x) / geometry.scale - 6, top: (target.bounds.y - geometry.y) / geometry.scale - 6, width: target.bounds.w / geometry.scale + 12, height: target.bounds.h / geometry.scale + 12 }} />}
@@ -67,7 +73,7 @@ function Confirmation({ ui }: { ui: UiState }) {
   return <main className={`confirmation glass ${blocked ? "blocked" : ""}`} onKeyDown={e => { if (e.key === "Enter" && !e.ctrlKey && !e.metaKey) { e.preventDefault(); e.stopPropagation(); } }}>
     <div className="card-heading"><span className={`state-icon ${blocked ? "red" : "amber"}`}>{blocked ? "⊘" : "!"}</span><div><h2>{blocked ? "This action is blocked" : `Press “${ui.label}”?`}</h2><p>{ui.state === "await_confirm" ? ui.app : ui.label}</p></div></div>
     {ui.state === "await_confirm" && ui.detail && <p className="detail">{ui.detail}</p>}
-    {blocked ? <><p className="detail">Permanent deletion is never automatic. Offhand has stopped here.</p><button className="button" onClick={() => decide("stop")}>OK <Key>esc</Key></button></> : <div className="actions"><button className="button allow" onClick={e => { if (e.detail > 0) decide("allow"); }}>Allow <Key>{primary} ↵</Key></button><button className="button" onClick={() => decide("skip")}>Skip <Key>⇥</Key></button><button className="quiet" onClick={() => decide("stop")}>Stop <Key>esc</Key></button></div>}
+    {blocked ? <><p className="detail">Permanent deletion is never automatic. Offhand has stopped here.</p><button className="button" onClick={() => decide("stop")}>OK <Key>esc</Key></button></> : <div className="actions"><button className="button allow" onClick={() => decide("allow")}>Allow <Key>{primary} ↵</Key></button><button className="button" onClick={() => decide("skip")}>Skip <Key>⇥</Key></button><button className="quiet" onClick={() => decide("stop")}>Stop <Key>esc</Key></button></div>}
     {error && <p className="error" role="alert">{error}</p>}
   </main>;
 }
@@ -88,7 +94,7 @@ function Preferences({ firstRun }: { firstRun: boolean }) {
   useEffect(() => { void api.settings().then(s => { setSettings(s); setHotkey(s.hotkey); }).catch(e => setError(errorText(e))); }, []);
   useEffect(() => {
     if (firstRun && current !== "Permissions") return;
-    const poll = () => { void api.permissions().then(setPermissions).catch(e => setError(errorText(e))); };
+    const poll = () => { if (document.visibilityState === "hidden") return; void api.permissions().then(setPermissions).catch(e => setError(errorText(e))); };
     poll(); const interval = setInterval(poll, 1000); return () => clearInterval(interval);
   }, [firstRun, current]);
   const request = (p: "accessibility" | "screen_recording") => { void api.requestPermission(p).then(setPermissions).catch(e => setError(errorText(e))); };
