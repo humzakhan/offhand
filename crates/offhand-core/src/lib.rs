@@ -1,6 +1,6 @@
 //! Deterministic, accessibility-first single-command runner.
 
-use offhand_infer::Engine;
+use offhand_infer::{Embedder, Engine};
 use offhand_platform::{Action, Element, Platform, WindowId};
 use offhand_policy::Risk;
 use serde::{Deserialize, Serialize};
@@ -226,10 +226,11 @@ enum Stage {
     Ready { focus_wait: Option<u8> },
 }
 
-/// Drives a platform on its owning thread; inference is deliberately unused in T0.
+/// Drives a platform on its owning thread with optional local label ranking.
 pub struct Agent<P: Platform, E: Engine> {
     platform: P,
     _engine: E,
+    embedder: Option<Box<dyn Embedder>>,
     state: UiState,
     subscribers: Vec<Sender<UiState>>,
     command: Option<Command>,
@@ -239,6 +240,7 @@ pub struct Agent<P: Platform, E: Engine> {
     confirmation_id: u64,
     approved: bool,
     revalidation_mismatches: u8,
+    focus_failures: u8,
 }
 
 // Do not expose command text or typed secrets through diagnostic formatting.
@@ -257,6 +259,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
         Self {
             platform,
             _engine: engine,
+            embedder: offhand_infer::default_embedder(),
             state: UiState::Idle,
             subscribers: Vec::new(),
             command: None,
@@ -266,6 +269,43 @@ impl<P: Platform, E: Engine> Agent<P, E> {
             confirmation_id: 0,
             approved: false,
             revalidation_mismatches: 0,
+            focus_failures: 0,
+        }
+    }
+
+    /// Override the default local embedder used to rank accessibility labels.
+    ///
+    /// Label commands use the highest-ranked enabled target, then enter the
+    /// existing policy and confirmation path. Embedding errors fall back to the
+    /// deterministic label matcher. This does not enable VLM selection or capture.
+    #[must_use]
+    pub fn with_embedder(mut self, embedder: Box<dyn Embedder>) -> Self {
+        self.embedder = Some(embedder);
+        self
+    }
+
+    fn match_label<'a>(&self, tree: &'a [Element], query: &str) -> Option<&'a Element> {
+        let Some(embedder) = self.embedder.as_deref() else {
+            return unique_match(tree, query);
+        };
+        if query.is_empty() {
+            return None;
+        }
+        // Keep native element identity; embeddings rank only enabled, labeled targets.
+        let candidates: Vec<_> = tree
+            .iter()
+            .filter_map(|element| {
+                element
+                    .label
+                    .as_deref()
+                    .filter(|label| element.enabled && !label.trim().is_empty())
+                    .map(|label| (element, label))
+            })
+            .collect();
+        let labels: Vec<_> = candidates.iter().map(|(_, label)| *label).collect();
+        match offhand_infer::shortlist(embedder, query, &labels, 1) {
+            Ok(indices) => indices.first().map(|&index| candidates[index].0),
+            Err(_) => unique_match(tree, query),
         }
     }
 
@@ -312,7 +352,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
         Ok(())
     }
 
-    /// Resolve or dispatch at most one native action, without sleeping or inference.
+    /// Resolve or dispatch at most one native action, without sleeping or VLM calls.
     pub fn tick(&mut self) -> Result<()> {
         if !matches!(self.state, UiState::Running { .. }) {
             return Ok(());
@@ -357,12 +397,23 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                         self.stuck("Window restoration was rejected");
                         return Ok(());
                     }
-                    self.platform.act(&action)?;
+                    // Record the attempt before dispatch so failures cannot retry forever.
+                    self.focus_failures += 1;
+                    if self.platform.act(&action).is_err() {
+                        if self.focus_failures >= 2 {
+                            self.stuck(
+                                "Window restoration failed twice; inspect permissions and retry explicitly",
+                            );
+                        }
+                        return Ok(());
+                    }
+                    self.focus_failures = 0;
                     self.stage = Stage::Ready {
                         focus_wait: Some(0),
                     };
                     return Ok(());
                 }
+                self.focus_failures = 0;
                 let Some(current) = self.resolve()? else {
                     return Ok(());
                 };
@@ -436,7 +487,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
         let (action, element) = match command {
             Command::Click(label) | Command::Press(label) => {
                 let tree = self.platform.tree(Some(window))?;
-                let Some(element) = unique_match(&tree, label.trim()) else {
+                let Some(element) = self.match_label(&tree, label.trim()) else {
                     self.stuck("No unique enabled accessibility label matched; refine the command and retry");
                     return Ok(None);
                 };
@@ -541,6 +592,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                 self.pending = None;
                 self.approved = false;
                 self.revalidation_mismatches = 0;
+                self.focus_failures = 0;
                 self.stage = Stage::Resolve;
                 self.running(None);
             } else {
@@ -559,6 +611,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
 
     fn clear_task(&mut self) {
         self.command = None;
+        self.focus_failures = 0;
         self.revalidation_mismatches = 0;
         self.pending = None;
         self.approved = false;
