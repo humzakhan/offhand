@@ -7,7 +7,7 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     let task = std::env::args().nth(1);
     if task.as_deref() == Some("fetch-model") {
-        match fetch_model::run(std::env::args().nth(2).as_deref()) {
+        match fetch_model::run(std::env::args().skip(2)) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("fetch-model: {error}");

@@ -8,10 +8,14 @@ Download the optional Apache-2.0 Q8_0 text tower:
 cargo xtask fetch-model embeddinggemma-2
 ```
 
-The task reads `models/manifest.toml`, streams the GGUF to disk, and prints its
-SHA-256. The manifest currently has no published checksum for this artifact;
-the task warns that the download is unverified rather than inventing a hash.
-An existing file is hashed and reused. Set `OFFHAND_MODELS_DIR` to choose the
+The task reads `models/manifest.toml`, prints the model's licence, streams the
+GGUF from its pinned repository revision, and verifies and prints its SHA-256.
+The EmbeddingGemma 2 checksum comes from the file's LFS `oid` in the
+[Hugging Face tree API](https://huggingface.co/api/models/unsloth/embeddinggemma-2-GGUF/tree/031f0d4b35536f69ab3509d4893c923264fcf253).
+An existing file is hashed and verified before reuse. A manifest checksum of
+`TBD` is a hard error unless `--allow-unverified` is explicitly passed; that
+option warns for both downloads and existing files. A full repository commit
+SHA remains required even with that option. Set `OFFHAND_MODELS_DIR` to choose the
 directory; otherwise both the downloader and backend use the platform's local
 data directory plus `offhand/models` (`~/Library/Application Support` on macOS,
 `%LOCALAPPDATA%` on Windows, `$XDG_DATA_HOME` or `~/.local/share` on Linux).

@@ -20,12 +20,25 @@ struct Manifest {
 struct Model {
     id: String,
     repo: String,
+    #[serde(default)]
+    revision: String,
     file: String,
     sha256: String,
+    license: String,
 }
 
-pub fn run(id: Option<&str>) -> Result<()> {
-    let id = id.ok_or("usage: cargo xtask fetch-model <id>")?;
+pub fn run(args: impl IntoIterator<Item = String>) -> Result<()> {
+    let mut id = None;
+    let mut allow_unverified = false;
+    for argument in args {
+        match argument.as_str() {
+            "--allow-unverified" => allow_unverified = true,
+            _ if argument.starts_with('-') => return Err(format!("unknown option: {argument}").into()),
+            _ if id.is_none() => id = Some(argument),
+            _ => return Err("usage: cargo xtask fetch-model <id> [--allow-unverified]".into()),
+        }
+    }
+    let id = id.ok_or("usage: cargo xtask fetch-model <id> [--allow-unverified]")?;
     let manifest: Manifest = toml::from_str(include_str!("../../models/manifest.toml"))?;
     let model = manifest
         .model
@@ -44,18 +57,21 @@ pub fn run(id: Option<&str>) -> Result<()> {
     {
         return Err("manifest does not specify a downloadable GGUF filename".into());
     }
+    if model.revision.len() != 40 || !model.revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("manifest must pin the model revision to a full repository commit SHA".into());
+    }
     let has_hash =
         model.sha256.len() == 64 && model.sha256.bytes().all(|byte| byte.is_ascii_hexdigit());
     if !has_hash {
-        // This artifact has no published checksum. Explicitly authorized by the
-        // embedding backend task: compute the real hash, never invent a pin.
-        if model.id != "embeddinggemma-2" || model.sha256 != "TBD" {
-            return Err("manifest has no valid SHA-256 for this model".into());
+        if model.sha256 != "TBD" || !allow_unverified {
+            return Err("manifest has no valid SHA-256; TBD requires --allow-unverified".into());
         }
+        // Warn before either the existing-file path or a new download.
         eprintln!(
-            "Warning: manifest SHA-256 is TBD; this download cannot be verified against a pinned checksum."
+            "Warning: manifest SHA-256 is TBD; --allow-unverified permits an unverified download or reuse."
         );
     }
+    println!("{}: licence {}", model.id, model.license);
     let directory =
         models_directory().ok_or("cannot locate models directory; set OFFHAND_MODELS_DIR")?;
     fs::create_dir_all(&directory)?;
@@ -89,8 +105,8 @@ fn models_directory() -> Option<PathBuf> {
 
 fn download(model: &Model, temporary: &Path, destination: &Path, has_hash: bool) -> Result<()> {
     let url = format!(
-        "https://huggingface.co/{}/resolve/main/{}",
-        model.repo, model.file
+        "https://huggingface.co/{}/resolve/{}/{}",
+        model.repo, model.revision, model.file
     );
     let client = reqwest::blocking::Client::builder()
         .https_only(true)
