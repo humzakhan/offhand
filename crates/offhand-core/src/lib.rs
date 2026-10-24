@@ -539,7 +539,11 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                     self.stuck("No unique enabled accessibility label matched; refine the command and retry");
                     return Ok(None);
                 };
-                (Action::Press(element.id.clone()), Some(element.clone()), score)
+                (
+                    Action::Press(element.id.clone()),
+                    Some(element.clone()),
+                    score,
+                )
             }
             Command::Type(text) => (
                 Action::Type(text),
