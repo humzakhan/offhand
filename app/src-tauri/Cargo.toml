@@ -20,13 +20,17 @@ workspace = true
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "offhand_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+# The Windows test harness for a Tauri lib can fail to start (missing manifest/WebView2 DLL
+# resolution), so the lib has no tests of its own.
+test = false
+doctest = false
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-opener = "2"
+offhand-core = { path = "../../crates/offhand-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
