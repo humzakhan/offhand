@@ -7,12 +7,15 @@ cross-check is not a parity proof. The shared contract suite has no assertions.
 
 | Capability | macOS | Windows | Notes |
 |---|---|---|---|
-| Bounded external-window tree | AXUIElement | UI Automation | Up to 2,000 nodes / 32 levels; native responsiveness varies |
-| Enabled label invocation | AXPress | Invoke pattern | Unique exact → case-insensitive exact → substring; disabled exact blocks fallback |
+| Bounded external-window tree | AXUIElement | UI Automation | Up to 2,000 attempted nodes / 32 levels; cooperative 2.5 s deadline returns a partial snapshot; failing nodes/subtrees are skipped |
+| Enabled label invocation | AXPress | Invoke → Toggle → SelectionItem.Select → ExpandCollapse | Unique exact → case-insensitive exact → substring; disabled exact blocks fallback |
 | Secure field identity | PasswordField | PasswordField / IsPassword | Content need not be readable; typing requires confirmation |
-| Text input | CGEvent Unicode | SendInput UTF-16 | Captured-window restoration required; unknown focus requires confirmation |
+| Text input | CGEvent Unicode | SendInput UTF-16 | Up to 2,000 Unicode characters; controls other than newline/tab rejected before dispatch; newline/tab send Return/Tab; unknown focus requires confirmation |
 | Key/chord input | CGEvent | SendInput | Shared vocabulary; primary=Cmd / Ctrl; actual meta key stays distinct |
 | Application launch | open -a, one name argument | ShellExecute, no arguments | No shell strings, paths, URLs or options; settings apps require confirmation |
+| Launch name resolution | Launch Services application names | Executable / App Paths names | Windows: `calc` and `notepad` work; friendly display name `Calculator` does not resolve |
+| Launch permission | Accessibility trust required | No AX grant | macOS checks AX trust before every action, including OpenApp |
+| Window registry lifetime | Dead AX entries pruned, CF references released | Dead HWND / changed-process entries pruned | At 128 entries, evict the oldest non-target entry; retain the current target |
 | Captured-window restoration | AX/native activation | HWND foreground restoration | Failure enters Stuck; never silently type elsewhere |
 | Capture | Unimplemented | Unimplemented | Screen Recording is optional/future for T0 |
 | Model inference/download | Unavailable | Unavailable | NoopEngine; zero progress; no model dependency or fake readiness |
@@ -29,6 +32,7 @@ cross-check is not a parity proof. The shared contract suite has no assertions.
 | Setup | Hotkey → Permissions → Model → Try it | Hotkey → Model → Try it | Model pane honestly unavailable; no download required for tree commands |
 | Tray | Menu bar | Notification area | Pause/Resume and up to three real recent results |
 | Overlay coordinates | AX points converted to physical pixels | Physical UIA screen pixels | Desktop top-left origin, negative coordinates allowed; overlay converts per monitor |
+| Rectangle DPI assumption | CGDisplayMode pixel width / display bounds width | UIA bounds are already desktop physical pixels | Windows assumes Per-Monitor-V2 awareness and does not rescale UIA rectangles; the CLI has no explicit DPI context; thread DPI-awareness scoping and native mixed-DPI verification are deferred |
 | Content protection / click-through | Native Tauri protection | Native Tauri protection | Requires native verification; compile does not prove exclusion |
 | Window material | Best-effort vibrancy | Best-effort Mica/Acrylic | Opaque graphite fallback; native appearance unverified |
 | CLI | Native adapter | Native adapter | Same runner; Linux reports unsupported (exit 2) |
