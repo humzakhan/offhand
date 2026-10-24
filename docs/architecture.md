@@ -2,7 +2,7 @@
 
 This document describes the components of Offhand, their boundaries, and the
 step loop. The reasons for each choice are in [`thesis.md`](thesis.md) and in
-[`adr/`](adr/).
+[`adr/`](adr/). The UI surfaces are specified in [`ui.md`](ui.md).
 
 ## Components
 

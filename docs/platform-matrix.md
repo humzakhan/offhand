@@ -17,3 +17,7 @@ one column only.
 | GPU inference | planned (Metal) | planned (CUDA, Vulkan) | |
 | NPU inference | not planned | stretch | Snapdragon only, if tested |
 | Permissions prompt | Accessibility, Screen Recording | none for UIA | macOS grants need a stable signature |
+| Hotkey | planned (⌥Space) | planned (Alt+Space) | Alt is the Windows equivalent of ⌥. It overrides the window system menu, so first run lets the user change it |
+| Permissions step in first run | planned (Accessibility, Screen Recording) | none | Windows has no grants to request, so first run has three steps instead of four |
+| Tray position | planned (menu bar, top right) | planned (notification area, bottom right) | Set by the OS. The status pill sits 20 px above the screen edge on macOS and above the taskbar on Windows |
+| Window material | planned (vibrancy) | planned (Mica or Acrylic) | Each OS has its own translucent material. Both need an opaque fallback |
