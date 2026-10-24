@@ -12,6 +12,9 @@ static NEXT_CONFIRMATION_ID: AtomicU64 = AtomicU64::new(1);
 /// Minimum cosine score for semantic fallback; provisional until benched on both OSes.
 pub const MIN_EMBED_SCORE: f32 = 0.45;
 
+/// Minimum top-two cosine gap for semantic fallback; provisional until benched.
+pub const MIN_EMBED_MARGIN: f32 = 0.05;
+
 /// Escalation ladder retained for future local inference backends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Tier {
@@ -204,9 +207,19 @@ struct Pending {
     action: Action,
     element: Option<Element>,
     window: Option<WindowId>,
+    semantic_score: Option<f32>,
 }
 
 impl Pending {
+    fn risk(&self) -> Risk {
+        let risk = offhand_policy::classify(&self.action, self.element.as_ref());
+        if risk == Risk::Safe && self.semantic_score.is_some() {
+            Risk::Confirm
+        } else {
+            risk
+        }
+    }
+
     fn target(&self) -> Option<Target> {
         self.element.as_ref().map(|element| Target {
             label: element
@@ -244,6 +257,7 @@ pub struct Agent<P: Platform, E: Engine> {
     approved: bool,
     revalidation_mismatches: u8,
     focus_failures: u8,
+    focus_error: Option<String>,
 }
 
 // Do not expose command text or typed secrets through diagnostic formatting.
@@ -273,29 +287,46 @@ impl<P: Platform, E: Engine> Agent<P, E> {
             approved: false,
             revalidation_mismatches: 0,
             focus_failures: 0,
+            focus_error: None,
         }
     }
 
     /// Override the default local embedder used to rank accessibility labels.
     ///
-    /// Deterministic matches take priority. Otherwise, label commands use the
-    /// highest-ranked enabled target only at or above [`MIN_EMBED_SCORE`], then
-    /// enter the existing policy and confirmation path. Embedding errors leave
-    /// the command unmatched. This does not enable VLM selection or capture.
+    /// Deterministic matches take priority; ambiguity and disabled matches stay
+    /// unmatched. Only queries without deterministic candidates use semantic
+    /// fallback, subject to [`MIN_EMBED_SCORE`] and [`MIN_EMBED_MARGIN`]. Semantic
+    /// targets always require confirmation unless policy blocks them. Embedding
+    /// errors leave the command unmatched. This does not enable VLM or capture.
     #[must_use]
     pub fn with_embedder(mut self, embedder: Box<dyn Embedder>) -> Self {
         self.embedder = Some(embedder);
         self
     }
 
-    fn match_label<'a>(&self, tree: &'a [Element], query: &str) -> Option<&'a Element> {
+    fn match_label<'a>(
+        &self,
+        tree: &'a [Element],
+        query: &str,
+    ) -> Option<(&'a Element, Option<f32>)> {
         if let Some(element) = unique_match(tree, query) {
-            return Some(element);
+            return Some((element, None));
         }
-        let embedder = self.embedder.as_deref()?;
         if query.is_empty() {
             return None;
         }
+        let lower = query.to_lowercase();
+        // Preserve every deterministic ambiguity/disabled-target guard. Exact
+        // matches are included by containment, even when disabled or duplicated.
+        if tree.iter().any(|element| {
+            element
+                .label
+                .as_ref()
+                .is_some_and(|label| label.to_lowercase().contains(&lower))
+        }) {
+            return None;
+        }
+        let embedder = self.embedder.as_deref()?;
         // Keep native element identity; embeddings rank only enabled, labeled targets.
         let candidates: Vec<_> = tree
             .iter()
@@ -308,11 +339,16 @@ impl<P: Platform, E: Engine> Agent<P, E> {
             })
             .collect();
         let labels: Vec<_> = candidates.iter().map(|(_, label)| *label).collect();
-        let scores = offhand_infer::shortlist_with_scores(embedder, query, &labels, 1).ok()?;
-        scores
-            .first()
-            .filter(|(_, score)| *score >= MIN_EMBED_SCORE)
-            .map(|&(index, _)| candidates[index].0)
+        let scores = offhand_infer::shortlist_with_scores(embedder, query, &labels, 2).ok()?;
+        let &(index, score) = scores.first()?;
+        if score < MIN_EMBED_SCORE
+            || scores
+                .get(1)
+                .is_some_and(|(_, second)| score - second < MIN_EMBED_MARGIN)
+        {
+            return None;
+        }
+        Some((candidates[index].0, Some(score)))
     }
 
     /// Current public state; accepting a command does not imply completion.
@@ -405,21 +441,26 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                     }
                     // Record the attempt before dispatch so failures cannot retry forever.
                     self.focus_failures += 1;
-                    if self.platform.act(&action).is_err() {
+                    if let Err(error) = self.platform.act(&action) {
+                        self.focus_error.get_or_insert_with(|| error.to_string());
                         if self.focus_failures >= 2 {
-                            self.stuck(
-                                "Window restoration failed twice; inspect permissions and retry explicitly",
+                            let reason = format!(
+                                "Window restoration failed twice; first error: {}; inspect permissions and retry explicitly",
+                                self.focus_error.as_deref().unwrap_or_default(),
                             );
+                            self.stuck(&reason);
                         }
                         return Ok(());
                     }
                     self.focus_failures = 0;
+                    self.focus_error = None;
                     self.stage = Stage::Ready {
                         focus_wait: Some(0),
                     };
                     return Ok(());
                 }
                 self.focus_failures = 0;
+                self.focus_error = None;
                 let Some(current) = self.resolve()? else {
                     return Ok(());
                 };
@@ -435,7 +476,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                     return Ok(());
                 }
                 self.revalidation_mismatches = 0;
-                match offhand_policy::classify(&current.action, current.element.as_ref()) {
+                match current.risk() {
                     Risk::Block => {
                         self.present(current)?;
                     }
@@ -484,28 +525,31 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                 action: Action::OpenApp(name),
                 element: None,
                 window: None,
+                semantic_score: None,
             }));
         }
         let Some(window) = self.window else {
             self.stuck("No external target window was captured");
             return Ok(None);
         };
-        let (action, element) = match command {
+        let (action, element, semantic_score) = match command {
             Command::Click(label) | Command::Press(label) => {
                 let tree = self.platform.tree(Some(window))?;
-                let Some(element) = self.match_label(&tree, label.trim()) else {
+                let Some((element, score)) = self.match_label(&tree, label.trim()) else {
                     self.stuck("No unique enabled accessibility label matched; refine the command and retry");
                     return Ok(None);
                 };
-                (Action::Press(element.id.clone()), Some(element.clone()))
+                (Action::Press(element.id.clone()), Some(element.clone()), score)
             }
             Command::Type(text) => (
                 Action::Type(text),
                 self.platform.focused_element(Some(window))?,
+                None,
             ),
             Command::Key(key) => (
                 Action::Key(key),
                 self.platform.focused_element(Some(window))?,
+                None,
             ),
             Command::Open(_) => return Ok(None),
         };
@@ -513,6 +557,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
             action,
             element,
             window: Some(window),
+            semantic_score,
         }))
     }
 
@@ -533,7 +578,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                 .map_or_else(|| "Action".into(), Command::label)
         });
         let detail = confirmation_detail(&pending);
-        let risk = offhand_policy::classify(&pending.action, pending.element.as_ref());
+        let risk = pending.risk();
         self.pending = Some(pending);
         self.stage = Stage::Ready { focus_wait: None };
         match risk {
@@ -599,6 +644,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
                 self.approved = false;
                 self.revalidation_mismatches = 0;
                 self.focus_failures = 0;
+                self.focus_error = None;
                 self.stage = Stage::Resolve;
                 self.running(None);
             } else {
@@ -618,6 +664,7 @@ impl<P: Platform, E: Engine> Agent<P, E> {
     fn clear_task(&mut self) {
         self.command = None;
         self.focus_failures = 0;
+        self.focus_error = None;
         self.revalidation_mismatches = 0;
         self.pending = None;
         self.approved = false;
@@ -644,6 +691,10 @@ impl<P: Platform, E: Engine> Agent<P, E> {
 }
 
 fn confirmation_detail(pending: &Pending) -> Option<String> {
+    if let Some(score) = pending.semantic_score {
+        let label = pending.element.as_ref()?.label.as_deref()?;
+        return Some(format!("matched {label:?} (similarity {score:.2})"));
+    }
     let detail = match &pending.action {
         Action::Type(text) => {
             let password = pending.element.as_ref().is_some_and(|element| {

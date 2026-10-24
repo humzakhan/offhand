@@ -12,7 +12,7 @@ license = "Apache-2.0"
 
 [[model]]
 id = "embeddinggemma-2"
-role = "optional label embedder (v0.2)"
+role = "used whenever the model is installed (v0.1 path; backend lands via embed-llama)"
 # https://huggingface.co/unsloth/embeddinggemma-2-GGUF
 repo = "unsloth/embeddinggemma-2-GGUF"
 # About 310 MB; text tower only. Requires llama.cpp >= 4fbc76d (PR #30054).
