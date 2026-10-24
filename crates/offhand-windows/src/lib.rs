@@ -391,8 +391,34 @@ fn send(inputs: &[INPUT]) -> Result<()> {
     if count as usize == inputs.len() {
         Ok(())
     } else {
+        release_partial_input(&inputs[..(count as usize).min(inputs.len())]);
         Err(Error::PermissionDenied("SendInput was blocked or partially delivered (integrity/UIPI or desktop restriction); action was not retried".into()))
     }
+}
+fn release_partial_input(inserted: &[INPUT]) {
+    let mut held = HashMap::new();
+    for event in inserted {
+        if event.r#type != INPUT_KEYBOARD { continue; }
+        // SAFETY: the tag above identifies the active KEYBDINPUT member of this INPUT union.
+        let keyboard = unsafe { event.Anonymous.ki };
+        let key = (keyboard.wVk.0, keyboard.wScan);
+        if keyboard.dwFlags.contains(KEYEVENTF_KEYUP) {
+            held.remove(&key);
+        } else {
+            held.insert(key, keyboard.dwFlags);
+        }
+    }
+    let releases: Vec<_> = held.into_iter().map(|((key, scan), flags)| input(key, scan, flags | KEYEVENTF_KEYUP)).collect();
+    if !releases.is_empty() {
+        // SAFETY: initialized keyboard release records and exact ABI size. Only release
+        // events are sent; the failed text/key action is never replayed.
+        let _ = unsafe { SendInput(&releases, size_of::<INPUT>() as i32) };
+    }
+}
+fn modifier_input(key: u16, up: bool) -> INPUT {
+    let mut flags = if key == 0x5b { KEYEVENTF_EXTENDEDKEY } else { KEYBD_EVENT_FLAGS(0) };
+    if up { flags |= KEYEVENTF_KEYUP; }
+    input(key, 0, flags)
 }
 fn launch(name: &str) -> Result<()> {
     if name.trim().is_empty()
@@ -501,7 +527,7 @@ impl Platform for WindowsPlatform {
                 let (key, modifiers, extended) = key(chord)?;
                 let mut events: Vec<_> = modifiers
                     .iter()
-                    .map(|&key| input(key, 0, KEYBD_EVENT_FLAGS(0)))
+                    .map(|&key| modifier_input(key, false))
                     .collect();
                 let flag = if extended {
                     KEYEVENTF_EXTENDEDKEY
@@ -514,7 +540,7 @@ impl Platform for WindowsPlatform {
                     modifiers
                         .iter()
                         .rev()
-                        .map(|&key| input(key, 0, KEYEVENTF_KEYUP)),
+                        .map(|&key| modifier_input(key, true)),
                 );
                 send(&events)
             }

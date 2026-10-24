@@ -2,9 +2,14 @@
 #![allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 
 use offhand_platform::{Error, Rect, Result};
+use objc2_application_services::{AXUIElement, AXValue, AXValueType, AXIsProcessTrusted};
+use core_graphics::{
+    event::{CGEvent, CGEventFlags, CGEventTapLocation},
+    event_source::{CGEventSource, CGEventSourceStateID},
+};
 use std::{
     ffi::{CString, c_char, c_void},
-    ptr,
+    ptr::{self, NonNull},
 };
 
 type Ref = *const c_void;
@@ -47,32 +52,26 @@ unsafe extern "C" {
 }
 #[link(name = "ApplicationServices", kind = "framework")]
 unsafe extern "C" {
-    fn AXIsProcessTrusted() -> bool;
-    fn AXUIElementCreateSystemWide() -> Ref;
-    fn AXUIElementCopyAttributeValue(element: Ref, attr: Ref, value: *mut Ref) -> i32;
-    fn AXUIElementCopyAttributeValues(
-        element: Ref,
-        attr: Ref,
-        index: isize,
-        max: isize,
-        value: *mut Ref,
-    ) -> i32;
-    fn AXUIElementSetAttributeValue(element: Ref, attr: Ref, value: Ref) -> i32;
-    fn AXUIElementPerformAction(element: Ref, action: Ref) -> i32;
-    fn AXUIElementSetMessagingTimeout(element: Ref, seconds: f32) -> i32;
-    fn AXUIElementGetPid(element: Ref, pid: *mut i32) -> i32;
+
+
+
+
+
+
+
+
     fn AXUIElementGetTypeID() -> usize;
     fn AXValueGetTypeID() -> usize;
-    fn AXValueGetValue(value: Ref, kind: u32, output: *mut c_void) -> bool;
+
     fn CGPreflightScreenCaptureAccess() -> bool;
     fn CGRequestScreenCaptureAccess() -> bool;
     fn CGGetDisplaysWithPoint(point: Point, max: u32, displays: *mut u32, count: *mut u32) -> i32;
     fn CGDisplayBounds(display: u32) -> CRect;
     fn CGDisplayPixelsWide(display: u32) -> usize;
-    fn CGEventCreateKeyboardEvent(source: Ref, key: u16, down: bool) -> Ref;
-    fn CGEventKeyboardSetUnicodeString(event: Ref, length: usize, text: *const u16);
-    fn CGEventSetFlags(event: Ref, flags: u64);
-    fn CGEventPost(tap: u32, event: Ref);
+
+
+
+
     static kCFBooleanTrue: Ref;
 }
 
@@ -106,19 +105,33 @@ impl Object {
     }
     pub(super) fn system() -> Result<Self> {
         // SAFETY: no arguments; returns a newly owned AX reference.
-        let object = Self::owned(unsafe { AXUIElementCreateSystemWide() })?;
+        let ax = unsafe { AXUIElement::new_system_wide() };
+        let raw = (&*ax as *const AXUIElement).cast();
+        // Transfer the create reference into our type-erased CF owner.
+        std::mem::forget(ax);
+        let object = Self::owned(raw)?;
         object.timeout();
         Ok(object)
     }
+    fn ax(&self) -> Result<&AXUIElement> {
+        // SAFETY: self is a live CF object and is type-checked before creating an AX reference.
+        if unsafe { CFGetTypeID(self.0) != AXUIElementGetTypeID() } {
+            return Err(Error::Other("expected accessibility element".into()));
+        }
+        // SAFETY: the type check above established AXUIElement and self retains its lifetime.
+        Ok(unsafe { &*self.0.cast::<AXUIElement>() })
+    }
     fn timeout(&self) {
-        // SAFETY: self is an AX element at all call sites; timeout bounds provider stalls.
-        unsafe { AXUIElementSetMessagingTimeout(self.0, 0.15) };
+        if let Ok(ax) = self.ax() {
+            // SAFETY: validated AX element remains retained for the duration of this call.
+            unsafe { ax.set_messaging_timeout(0.15) };
+        }
     }
     pub(super) fn attr(&self, name: &str) -> Result<Self> {
         let name = Self::string(name)?;
         let mut value = ptr::null();
         // SAFETY: self/name are live references; value is writable out storage.
-        status(unsafe { AXUIElementCopyAttributeValue(self.0, name.0, &raw mut value) })?;
+        status(unsafe { self.ax()?.copy_attribute_value(&*name.0.cast(), NonNull::from(&mut value).cast()) }.0)?;
         Self::owned(value)
     }
     pub(super) fn ax_attr(&self, name: &str) -> Result<Self> {
@@ -139,7 +152,7 @@ impl Object {
         let mut raw = ptr::null();
         // SAFETY: valid AX receiver, CFString key and out pointer; limit is at most 2000.
         let result = unsafe {
-            AXUIElementCopyAttributeValues(self.0, name.0, 0, native_limit, &raw mut raw)
+            self.ax()?.copy_attribute_values(&*name.0.cast(), 0, native_limit, NonNull::from(&mut raw).cast()).0
         };
         if result == -25205 || result == -25212 {
             return Ok(Vec::new());
@@ -189,14 +202,15 @@ impl Object {
         String::from_utf8(bytes[..end].to_vec()).ok()
     }
     pub(super) fn boolean(&self) -> Option<bool> {
-        // SAFETY: boolean access follows a successful CFBoolean type check.
-        (unsafe { CFGetTypeID(self.0) == CFBooleanGetTypeID() })
-            .then(|| unsafe { CFBooleanGetValue(self.0) != 0 })
+        // SAFETY: type checks accept every live CF object.
+        if unsafe { CFGetTypeID(self.0) != CFBooleanGetTypeID() } { return None; }
+        // SAFETY: the type check above established CFBoolean; self retains its lifetime.
+        Some(unsafe { CFBooleanGetValue(self.0) != 0 })
     }
     pub(super) fn pid(&self) -> Result<i32> {
         let mut pid = 0;
         // SAFETY: valid AX reference and writable pid storage.
-        status(unsafe { AXUIElementGetPid(self.0, &raw mut pid) })?;
+        status(unsafe { self.ax()?.pid(NonNull::from(&mut pid)) }.0)?;
         Ok(pid)
     }
     pub(super) fn same(&self, other: &Self) -> bool {
@@ -210,17 +224,17 @@ impl Object {
     pub(super) fn perform(&self, action: &str) -> Result<()> {
         let action = Self::string(action)?;
         // SAFETY: receiver is an AX element and action a live CFString.
-        status(unsafe { AXUIElementPerformAction(self.0, action.0) })
+        status(unsafe { self.ax()?.perform_action(&*action.0.cast()) }.0)
     }
     pub(super) fn set(&self, name: &str, value: &Self) -> Result<()> {
         let name = Self::string(name)?;
         // SAFETY: live AX receiver, string key and CF value for duration of call.
-        status(unsafe { AXUIElementSetAttributeValue(self.0, name.0, value.0) })
+        status(unsafe { self.ax()?.set_attribute_value(&*name.0.cast(), &*value.0.cast()) }.0)
     }
     pub(super) fn set_true(&self, name: &str) -> Result<()> {
         let name = Self::string(name)?;
         // SAFETY: live AX receiver/string key; kCFBooleanTrue is an immortal CFBoolean.
-        status(unsafe { AXUIElementSetAttributeValue(self.0, name.0, kCFBooleanTrue) })
+        status(unsafe { self.ax()?.set_attribute_value(&*name.0.cast(), &*kCFBooleanTrue.cast()) }.0)
     }
     pub(super) fn bounds(&self) -> Result<Rect> {
         let position = self.attr("AXPosition")?;
@@ -236,8 +250,8 @@ impl Object {
         let mut s = Size::default();
         // SAFETY: output types match kAXValueCGPointType (1) and CGSizeType (2).
         if !unsafe {
-            AXValueGetValue(position.0, 1, (&raw mut p).cast())
-                && AXValueGetValue(size.0, 2, (&raw mut s).cast())
+            (&*position.0.cast::<AXValue>()).value(AXValueType::CGPoint, NonNull::from(&mut p).cast())
+                && (&*size.0.cast::<AXValue>()).value(AXValueType::CGSize, NonNull::from(&mut s).cast())
         } {
             return Err(Error::Other("missing accessibility geometry".into()));
         }
@@ -293,17 +307,17 @@ pub(super) fn require_trust() -> Result<()> {
     }
 }
 pub(super) fn keyboard(key: u16, flags: u64, text: Option<&[u16]>) -> Result<()> {
+    let source = CGEventSource::new(CGEventSourceStateID::HIDSystemState)
+        .map_err(|()| Error::Other("keyboard event source unavailable".into()))?;
     for down in [true, false] {
-        // SAFETY: null selects default source; key is a validated virtual key code.
-        let event = Object::owned(unsafe { CGEventCreateKeyboardEvent(ptr::null(), key, down) })?;
-        // SAFETY: live CGEvent reference with no aliasing mutation on another thread.
-        unsafe { CGEventSetFlags(event.0, flags) };
+        let event = CGEvent::new_keyboard_event(source.clone(), key, down)
+            .map_err(|()| Error::Other("keyboard event unavailable".into()))?;
+        event.set_flags(CGEventFlags::from_bits_retain(flags));
         if let Some(text) = text {
-            // SAFETY: UTF-16 slice remains valid through call, length matches allocation.
-            unsafe { CGEventKeyboardSetUnicodeString(event.0, text.len(), text.as_ptr()) };
+            // The caller supplies complete Unicode scalars, including paired surrogates.
+            event.set_string_from_utf16_unchecked(text);
         }
-        // SAFETY: event is live; kCGHIDEventTap is 0. AX trust was checked by caller.
-        unsafe { CGEventPost(0, event.0) };
+        event.post(CGEventTapLocation::HID);
     }
     Ok(())
 }
