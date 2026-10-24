@@ -10,3 +10,5 @@
 .pill .state-message{max-width:min(48vw,720px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 html[data-surface="command"]:not([data-material="native"]) .glass,html[data-surface="confirm"]:not([data-material="native"]) .glass{background:#18181b}
+
+.confirmation{height:100vh;overflow:auto;display:flex;flex-direction:column}.confirmation .actions{margin-top:auto;padding-top:16px}.confirmation.blocked .button{margin-top:auto}

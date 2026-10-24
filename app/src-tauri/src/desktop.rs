@@ -53,6 +53,7 @@ pub fn create_windows(app: &AppHandle) -> tauri::Result<()> {
             let native_material = window
                 .set_effects(tauri::utils::config::WindowEffectsConfig {
                     effects: vec![tauri::window::Effect::HudWindow],
+                    radius: Some(14.0),
                     ..Default::default()
                 })
                 .is_ok();
