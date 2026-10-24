@@ -610,7 +610,7 @@ fn registered_application(root: HKEY, executable: &str) -> Option<PathBuf> {
             RRF_RT_REG_SZ,
             None,
             Some(value.as_mut_ptr().cast()),
-            Some(&mut bytes),
+            Some(&raw mut bytes),
         )
     };
     if status.is_err() {
