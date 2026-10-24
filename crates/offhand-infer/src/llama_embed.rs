@@ -60,6 +60,9 @@ impl LlamaEmbedder {
         // CPU is the portable default; no GPU runtime is required on Windows.
         let params = LlamaModelParams::default().with_n_gpu_layers(0);
         let model = LlamaModel::load_from_file(backend, path, &params).map_err(backend_error)?;
+        if model.meta_val_str("general.architecture").map_err(backend_error)? != "embeddinggemma2" {
+            return Err(Error::Backend("expected an embeddinggemma2 GGUF model".into()));
+        }
         if model.n_embd_out() < 256 {
             return Err(Error::Backend("model output has fewer than 256 dimensions".into()));
         }

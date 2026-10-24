@@ -29,7 +29,8 @@ pub fn run(id: Option<&str>) -> Result<()> {
     let manifest: Manifest = toml::from_str(include_str!("../../models/manifest.toml"))?;
     let model = manifest.model.into_iter().find(|model| model.id == id)
         .ok_or_else(|| format!("unknown model: {id}"))?;
-    if !model.file.ends_with(".gguf")
+    if Path::new(&model.file).extension().and_then(|ext| ext.to_str())
+        .is_none_or(|ext| !ext.eq_ignore_ascii_case("gguf"))
         || Path::new(&model.file).file_name().and_then(|name| name.to_str()) != Some(&model.file)
         || model.file.contains(['/', '\\'])
     {
@@ -82,7 +83,7 @@ fn download(model: &Model, temporary: &Path, destination: &Path, has_hash: bool)
     let mut output = OpenOptions::new().write(true).create_new(true).open(temporary)?;
     let mut digest = Sha256::new();
     let mut bytes = 0_u64;
-    let mut buffer = [0_u8; 64 * 1024];
+    let mut buffer = vec![0_u8; 64 * 1024];
     loop {
         let count = response.read(&mut buffer)?;
         if count == 0 {
@@ -110,7 +111,7 @@ fn download(model: &Model, temporary: &Path, destination: &Path, has_hash: bool)
 fn hash_file(path: &Path) -> Result<String> {
     let mut file = File::open(path)?;
     let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 64 * 1024];
+    let mut buffer = vec![0_u8; 64 * 1024];
     loop {
         let count = file.read(&mut buffer)?;
         if count == 0 {
