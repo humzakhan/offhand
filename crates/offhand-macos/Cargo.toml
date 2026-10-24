@@ -1,0 +1,20 @@
+[package]
+name = "offhand-macos"
+description = "macOS adapter for the Offhand platform contract"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+offhand-platform = { path = "../offhand-platform" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.25.0"
+objc2 = "0.6.5"
+objc2-application-services = "0.3.2"

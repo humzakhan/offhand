@@ -1,0 +1,16 @@
+[package]
+name = "offhand-core"
+description = "Agent loop for Offhand"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+offhand-platform = { path = "../offhand-platform" }
+offhand-infer = { path = "../offhand-infer" }

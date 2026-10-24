@@ -1,0 +1,16 @@
+[package]
+name = "offhand-infer"
+description = "Inference engine interface for Offhand"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+offhand-platform = { path = "../offhand-platform" }
+thiserror = "2"

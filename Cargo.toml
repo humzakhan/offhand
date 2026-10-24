@@ -1,0 +1,37 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/offhand-core",
+    "crates/offhand-policy",
+    "crates/offhand-platform",
+    "crates/offhand-macos",
+    "crates/offhand-windows",
+    "crates/offhand-infer",
+    "crates/offhand-cloud",
+    "crates/offhand-cli",
+    "app/src-tauri",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.94"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/humzakhan/offhand"
+authors = ["Humza Khan <hello@humza.io>"]
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+unwrap_used = "warn"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
