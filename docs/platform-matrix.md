@@ -34,7 +34,7 @@ cross-check is not a parity proof. The shared contract suite has no assertions.
 | Tray | Menu bar | Notification area | Pause/Resume and up to three real recent results |
 | Overlay coordinates | AX points converted to physical pixels | Physical UIA screen pixels | Desktop top-left origin, negative coordinates allowed; overlay converts per monitor |
 | Rectangle DPI assumption | CGDisplayMode pixel width / display bounds width | UIA bounds are already desktop physical pixels | Windows assumes Per-Monitor-V2 awareness and does not rescale UIA rectangles; the CLI has no explicit DPI context; thread DPI-awareness scoping and native mixed-DPI verification are deferred |
-| Content protection / click-through | Native Tauri protection | Native Tauri protection | Requires native verification; compile does not prove exclusion |
+| Content protection / click-through | Native Tauri protection (`setIgnoresMouseEvents`) | Native Tauri protection (`WS_EX_TRANSPARENT`) | Same code path. Floating windows start hidden; the overlay re-applies click-through on every show, resize and move. Requires native verification; compile does not prove exclusion |
 | Window material | Best-effort vibrancy | Best-effort Mica/Acrylic | Opaque graphite fallback; native appearance unverified |
 | CLI | Native adapter | Native adapter | Same runner; Linux reports unsupported (exit 2) |
 

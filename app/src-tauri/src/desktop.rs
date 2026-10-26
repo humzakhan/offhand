@@ -13,15 +13,41 @@ use crate::{
 #[derive(Debug)]
 struct NativeMaterials(Vec<String>);
 
+/// Windows that float above other apps. Each is created hidden and shown only
+/// for the core states that `visible_floating` lists. The stuck and paused
+/// pills are drawn inside the overlay, so they have no window of their own.
+const FLOATING: [&str; 3] = ["command", "overlay", "confirm"];
+
+/// Floating windows that must be visible for a core state. Idle maps to none.
+fn visible_floating(ui: &UiState) -> Vec<&'static str> {
+    FLOATING
+        .into_iter()
+        .filter(|label| match *label {
+            "command" => matches!(ui, UiState::Listening),
+            "confirm" => matches!(ui, UiState::AwaitConfirm { .. } | UiState::Blocked { .. }),
+            _ => !matches!(ui, UiState::Idle | UiState::Listening),
+        })
+        .collect()
+}
+
+/// The overlay must never take clicks. Re-assert this after every show, resize
+/// or move, because the flag is native per-window state set asynchronously.
+fn click_through(app: &AppHandle) {
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        let _ = overlay.set_ignore_cursor_events(true);
+    }
+}
+
 pub fn create_windows(app: &AppHandle) -> tauri::Result<()> {
     let mut materials = Vec::new();
-    for (label, width, height, floating) in [
-        ("command", 640.0, 96.0, true),
-        ("overlay", 800.0, 600.0, true),
-        ("confirm", 376.0, 230.0, true),
-        ("first-run", 760.0, 480.0, false),
-        ("settings", 780.0, 800.0, false),
+    for (label, width, height) in [
+        ("command", 640.0, 96.0),
+        ("overlay", 800.0, 600.0),
+        ("confirm", 376.0, 230.0),
+        ("first-run", 760.0, 480.0),
+        ("settings", 780.0, 800.0),
     ] {
+        let floating = FLOATING.contains(&label);
         let window = WebviewWindowBuilder::new(
             app,
             label,
@@ -42,6 +68,7 @@ pub fn create_windows(app: &AppHandle) -> tauri::Result<()> {
         .focused(false)
         .focusable(label != "overlay" && label != "confirm")
         .content_protected(floating)
+        // Every window starts hidden; `render` and `show_preferences` reveal it.
         .visible(false)
         .build()?;
         if label == "overlay" {
@@ -152,6 +179,7 @@ pub fn place(app: &AppHandle, target: Option<&Target>) {
         let _ = overlay.set_position(*pos);
         let _ = overlay.set_size(*size);
     }
+    click_through(app);
     if let Some(command) = app.get_webview_window("command") {
         let x = f64::from(work.position.x) + (f64::from(work.size.width) - 640.0 * scale) / 2.0;
         let y = f64::from(work.position.y) + f64::from(work.size.height) / 4.0;
@@ -192,15 +220,14 @@ pub fn render(app: &AppHandle, ui: &UiState) {
     if !matches!(ui, UiState::Idle) {
         place(app, target);
     }
-    for label in ["command", "overlay", "confirm"] {
-        let visible = match label {
-            "command" => matches!(ui, UiState::Listening),
-            "confirm" => matches!(ui, UiState::AwaitConfirm { .. } | UiState::Blocked { .. }),
-            _ => !matches!(ui, UiState::Idle | UiState::Listening),
-        };
+    let visible = visible_floating(ui);
+    for label in FLOATING {
         if let Some(w) = app.get_webview_window(label) {
-            if visible {
+            if visible.contains(&label) {
                 let _ = w.show();
+                if label == "overlay" {
+                    click_through(app);
+                }
                 if label == "command" {
                     let _ = w.set_focus();
                 }
@@ -341,4 +368,58 @@ pub fn emit(app: &AppHandle, revision: u64, ui: &UiState, armed: bool) {
         "offhand://state",
         serde_json::json!({"revision":revision,"ui":ui,"armed":armed}),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn running() -> UiState {
+        UiState::Running {
+            step: 1,
+            total: 1,
+            target: None,
+        }
+    }
+
+    #[test]
+    fn idle_shows_no_floating_window() {
+        assert!(visible_floating(&UiState::Idle).is_empty());
+    }
+
+    #[test]
+    fn running_includes_overlay_only() {
+        assert_eq!(visible_floating(&running()), ["overlay"]);
+    }
+
+    #[test]
+    fn listening_shows_only_the_command_bar() {
+        assert_eq!(visible_floating(&UiState::Listening), ["command"]);
+    }
+
+    #[test]
+    fn cards_show_confirm_with_overlay() {
+        let blocked = UiState::Blocked {
+            label: "Send".into(),
+            target: None,
+        };
+        assert_eq!(visible_floating(&blocked), ["overlay", "confirm"]);
+    }
+
+    #[test]
+    fn pills_and_done_use_the_overlay() {
+        for ui in [
+            UiState::Paused,
+            UiState::Stuck {
+                query: "Export".into(),
+                cloud_available: false,
+            },
+            UiState::Done {
+                summary: "ok".into(),
+                undoable: false,
+            },
+        ] {
+            assert_eq!(visible_floating(&ui), ["overlay"]);
+        }
+    }
 }
